@@ -1,0 +1,41 @@
+# Rust build output
+/target/
+**/target/
+
+# Cargo build artifacts
+**/*.rs.bk
+
+# VS Code & IDE settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.*
+
+# Local data
+/data/
+**/data/**
+
+# Node/Web (if any)
+node_modules/
+web-interface/dist/
+
+# Rust coverage and profiling
+.profraw
+coverage/
+
+# Docker
+*.local.yml
+
+# Python cache (for mock-server)
+__pycache__/
+*.pyc
