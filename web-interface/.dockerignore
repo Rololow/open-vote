@@ -1,0 +1,31 @@
+# Fichiers de développement
+target/
+dist/
+node_modules/
+*.log
+.git/
+.gitignore
+README.md
+.env*
+
+# Fichiers temporaires
+*.tmp
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+**/*.rs.bk
+Cargo.lock
+
+# WebAssembly
+*.wasm

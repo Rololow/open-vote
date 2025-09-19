@@ -1,0 +1,50 @@
+services:
+  # Mock Blockchain Server (Python)
+  api-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-server
+    container_name: egovern-api-mock
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    networks:
+      - egovern-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Interface web
+  web-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.web-only
+    container_name: egovern-webapp
+    ports:
+      - "8080:80"
+    depends_on:
+      api-server:
+        condition: service_healthy
+    networks:
+      - egovern-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Réseau pour la communication inter-conteneurs
+networks:
+  egovern-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

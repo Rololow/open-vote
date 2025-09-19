@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détail de la Loi - E-Government Blockchain</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📜</text></svg>">
+    
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .nav-bar {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .nav-bar a {
+            color: #4338ca;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .nav-bar a:hover {
+            text-decoration: underline;
+        }
+        
+        .law-detail {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .law-header {
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .law-title {
+            font-size: 2rem;
+            color: #1f2937;
+            margin-bottom: 1rem;
+        }
+        
+        .law-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .law-category {
+            background: #ede9fe;
+            color: #5b21b6;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+        
+        .law-status {
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+        
+        .status-active {
+            background: #dcfce7;
+            color: #166534;
+        }
+        
+        .status-voting {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        
+        .status-inreview {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+        
+        .law-info {
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+        
+        .law-summary {
+            background: #f8fafc;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            border-left: 4px solid #4338ca;
+        }
+        
+        .law-content {
+            line-height: 1.8;
+            margin-bottom: 2rem;
+        }
+        
+        .law-content h4 {
+            color: #374151;
+            margin: 1.5rem 0 0.5rem 0;
+            font-size: 1.1rem;
+        }
+        
+        .voting-section {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .voting-title {
+            font-size: 1.5rem;
+            color: #1f2937;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+        
+        .current-votes {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .vote-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .vote-number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .vote-for .vote-number {
+            color: #059669;
+        }
+        
+        .vote-against .vote-number {
+            color: #dc2626;
+        }
+        
+        .vote-abstain .vote-number {
+            color: #6b7280;
+        }
+        
+        .vote-label {
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+        
+        .vote-progress {
+            background: #e5e7eb;
+            height: 8px;
+            border-radius: 4px;
+            margin: 1.5rem 0;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981, #059669);
+            transition: width 0.8s ease;
+        }
+        
+        .vote-actions {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            border: 2px dashed #d1d5db;
+        }
+        
+        .vote-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+        }
+        
+        .vote-btn {
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 120px;
+        }
+        
+        .vote-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .btn-for {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-for:hover {
+            background: #059669;
+        }
+        
+        .btn-against {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-against:hover {
+            background: #dc2626;
+        }
+        
+        .btn-abstain {
+            background: #6b7280;
+            color: white;
+        }
+        
+        .btn-abstain:hover {
+            background: #4b5563;
+        }
+        
+        .vote-form {
+            display: none;
+            background: #fefefe;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            margin-top: 1rem;
+        }
+        
+        .vote-form.active {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #374151;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #4338ca;
+        }
+        
+        .submit-btn {
+            background: #4338ca;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        
+        .submit-btn:hover {
+            background: #3730a3;
+        }
+        
+        .cancel-btn {
+            background: #6b7280;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-left: 0.5rem;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s ease;
+        }
+        
+        .notification.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .notification.success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .notification.error {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #6b7280;
+        }
+        
+        .error {
+            background: #fef2f2;
+            color: #dc2626;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .law-title {
+                font-size: 1.5rem;
+            }
+            
+            .law-meta {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .vote-buttons {
+                flex-direction: column;
+            }
+            
+            .vote-btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav class="nav-bar">
+            <a href="/app.html">← Retour au tableau de bord</a>
+        </nav>
+        
+        <div id="loading" class="loading">Chargement des détails de la loi...</div>
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div id="law-content" style="display: none;">
+            <div class="law-detail">
+                <div class="law-header">
+                    <h1 class="law-title" id="law-title">-</h1>
+                    <div class="law-meta">
+                        <span class="law-category" id="law-category">-</span>
+                        <span class="law-status" id="law-status">-</span>
+                        <span class="law-info" id="law-info">-</span>
+                    </div>
+                </div>
+                
+                <div class="law-summary">
+                    <h3>📋 Résumé</h3>
+                    <p id="law-summary">-</p>
+                </div>
+                
+                <div class="law-content">
+                    <h3>📜 Texte Complet</h3>
+                    <div id="law-full-content">-</div>
+                </div>
+            </div>
+            
+            <div class="voting-section" id="voting-section" style="display: none;">
+                <h2 class="voting-title">🗳️ État des Votes</h2>
+                
+                <div class="current-votes">
+                    <div class="vote-card vote-for">
+                        <div class="vote-number" id="votes-for">0</div>
+                        <div class="vote-label">👍 Pour</div>
+                    </div>
+                    <div class="vote-card vote-against">
+                        <div class="vote-number" id="votes-against">0</div>
+                        <div class="vote-label">👎 Contre</div>
+                    </div>
+                    <div class="vote-card vote-abstain">
+                        <div class="vote-number" id="votes-abstain">0</div>
+                        <div class="vote-label">🤐 Abstention</div>
+                    </div>
+                </div>
+                
+                <div class="vote-progress">
+                    <div class="progress-bar" id="approval-bar"></div>
+                </div>
+                <div style="text-align: center; color: #6b7280; margin-bottom: 2rem;">
+                    <span id="approval-percentage">0</span>% d'approbation
+                </div>
+                
+                <div class="vote-actions">
+                    <h3 style="text-align: center; margin-bottom: 1.5rem; color: #374151;">
+                        💡 Exprimez votre vote
+                    </h3>
+                    
+                    <div class="vote-buttons">
+                        <button class="vote-btn btn-for" onclick="showVoteForm('for')">
+                            👍 Voter Pour
+                        </button>
+                        <button class="vote-btn btn-against" onclick="showVoteForm('against')">
+                            👎 Voter Contre
+                        </button>
+                        <button class="vote-btn btn-abstain" onclick="showVoteForm('abstain')">
+                            🤐 S'abstenir
+                        </button>
+                    </div>
+                    
+                    <div class="vote-form" id="vote-form">
+                        <h4 style="margin-bottom: 1rem; color: #374151;">
+                            Confirmer votre vote: <span id="vote-type-label">-</span>
+                        </h4>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="voter-name">Votre nom (optionnel)</label>
+                            <input type="text" id="voter-name" class="form-input" placeholder="Ex: Marie Dupont">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="vote-comment">Commentaire (optionnel)</label>
+                            <textarea id="vote-comment" class="form-input" rows="3" placeholder="Expliquez votre position..."></textarea>
+                        </div>
+                        
+                        <div>
+                            <button class="submit-btn" onclick="submitVote()">
+                                ✅ Confirmer le Vote
+                            </button>
+                            <button class="cancel-btn" onclick="hideVoteForm()">
+                                ❌ Annuler
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification toast -->
+    <div class="notification" id="notification"></div>
+
+    <script>
+        // Configuration
+        const API_BASE = 'http://localhost:8080';
+        let currentLaw = null;
+        let currentVoteType = null;
+
+        // Utilitaires
+        function formatDate(dateString) {
+            return new Date(dateString).toLocaleDateString('fr-FR', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function formatStatus(status) {
+            const statusClasses = {
+                'Active': 'status-active',
+                'Voting': 'status-voting',
+                'InReview': 'status-inreview'
+            };
+            return statusClasses[status] || 'status-inreview';
+        }
+
+        function calculateApprovalPercentage(votesFor, votesAgainst, votesAbstain) {
+            const total = votesFor + votesAgainst + votesAbstain;
+            return total > 0 ? Math.round((votesFor / total) * 100) : 0;
+        }
+
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.classList.add('show');
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // Gestion des votes
+        function showVoteForm(voteType) {
+            currentVoteType = voteType;
+            const form = document.getElementById('vote-form');
+            const label = document.getElementById('vote-type-label');
+            
+            const voteLabels = {
+                'for': '👍 Pour',
+                'against': '👎 Contre',
+                'abstain': '🤐 Abstention'
+            };
+            
+            label.textContent = voteLabels[voteType];
+            form.classList.add('active');
+            
+            // Scroll vers le formulaire
+            form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function hideVoteForm() {
+            const form = document.getElementById('vote-form');
+            form.classList.remove('active');
+            currentVoteType = null;
+            
+            // Reset du formulaire
+            document.getElementById('voter-name').value = '';
+            document.getElementById('vote-comment').value = '';
+        }
+
+        async function submitVote() {
+            if (!currentVoteType || !currentLaw) {
+                showNotification('Erreur: données manquantes', 'error');
+                return;
+            }
+
+            const voterName = document.getElementById('voter-name').value || 'Anonyme';
+            const comment = document.getElementById('vote-comment').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/vote`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        law_id: currentLaw.id,
+                        voter_id: 'web-user-' + Date.now(),
+                        vote_type: currentVoteType,
+                        voter_name: voterName,
+                        comment: comment,
+                        weight: 50
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification(`✅ Vote "${currentVoteType}" enregistré avec succès!`, 'success');
+                    hideVoteForm();
+                    
+                    // Simulation mise à jour des stats (dans une vraie app, on rechargerait)
+                    updateVoteStats(currentVoteType);
+                } else {
+                    throw new Error(result.error || 'Erreur inconnue');
+                }
+
+            } catch (error) {
+                console.error('Erreur lors du vote:', error);
+                showNotification(`❌ Erreur: ${error.message}`, 'error');
+            }
+        }
+
+        function updateVoteStats(voteType) {
+            // Simulation de mise à jour des stats
+            const voteElements = {
+                'for': document.getElementById('votes-for'),
+                'against': document.getElementById('votes-against'),
+                'abstain': document.getElementById('votes-abstain')
+            };
+            
+            if (voteElements[voteType]) {
+                const currentValue = parseInt(voteElements[voteType].textContent);
+                voteElements[voteType].textContent = currentValue + 1;
+                
+                // Recalculer le pourcentage d'approbation
+                const votesFor = parseInt(document.getElementById('votes-for').textContent);
+                const votesAgainst = parseInt(document.getElementById('votes-against').textContent);
+                const votesAbstain = parseInt(document.getElementById('votes-abstain').textContent);
+                
+                const percentage = calculateApprovalPercentage(votesFor, votesAgainst, votesAbstain);
+                document.getElementById('approval-percentage').textContent = percentage;
+                document.getElementById('approval-bar').style.width = percentage + '%';
+            }
+        }
+
+        // Chargement des données
+        async function loadLawDetails(lawId) {
+            const loadingEl = document.getElementById('loading');
+            const errorEl = document.getElementById('error');
+            const contentEl = document.getElementById('law-content');
+            
+            try {
+                loadingEl.style.display = 'block';
+                errorEl.style.display = 'none';
+                contentEl.style.display = 'none';
+                
+                const response = await fetch(`${API_BASE}/api/laws/${lawId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                currentLaw = data.law;
+                
+                renderLawDetails();
+                
+                loadingEl.style.display = 'none';
+                contentEl.style.display = 'block';
+                
+            } catch (error) {
+                console.error('Erreur chargement loi:', error);
+                loadingEl.style.display = 'none';
+                errorEl.style.display = 'block';
+                errorEl.textContent = `Erreur: ${error.message}`;
+            }
+        }
+
+        function renderLawDetails() {
+            if (!currentLaw) return;
+            
+            // Header
+            document.getElementById('law-title').textContent = currentLaw.title;
+            document.getElementById('law-category').textContent = currentLaw.category;
+            
+            const statusEl = document.getElementById('law-status');
+            statusEl.textContent = currentLaw.status;
+            statusEl.className = `law-status ${formatStatus(currentLaw.status)}`;
+            
+            document.getElementById('law-info').textContent = 
+                `Par ${currentLaw.author} • ${formatDate(currentLaw.created_at)}`;
+            
+            // Content
+            document.getElementById('law-summary').textContent = currentLaw.summary;
+            
+            const contentEl = document.getElementById('law-full-content');
+            if (currentLaw.content) {
+                contentEl.innerHTML = currentLaw.content.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>');
+                contentEl.innerHTML = '<p>' + contentEl.innerHTML + '</p>';
+            } else {
+                contentEl.innerHTML = '<p><em>Contenu détaillé en cours de rédaction...</em></p>';
+            }
+            
+            // Voting section
+            if (currentLaw.status === 'Voting' || currentLaw.status === 'Active') {
+                renderVotingSection();
+            }
+        }
+
+        function renderVotingSection() {
+            const votingSection = document.getElementById('voting-section');
+            votingSection.style.display = 'block';
+            
+            // Stats de votes
+            document.getElementById('votes-for').textContent = currentLaw.votes_for || 0;
+            document.getElementById('votes-against').textContent = currentLaw.votes_against || 0;
+            document.getElementById('votes-abstain').textContent = currentLaw.votes_abstain || 0;
+            
+            // Pourcentage d'approbation
+            const percentage = calculateApprovalPercentage(
+                currentLaw.votes_for || 0,
+                currentLaw.votes_against || 0,
+                currentLaw.votes_abstain || 0
+            );
+            
+            document.getElementById('approval-percentage').textContent = percentage;
+            document.getElementById('approval-bar').style.width = percentage + '%';
+        }
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('📜 Chargement de la page détail de loi...');
+            
+            // Récupérer l'ID de la loi depuis l'URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const lawId = urlParams.get('id');
+            
+            if (!lawId) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = 'Erreur: ID de loi manquant dans l\'URL';
+                return;
+            }
+            
+            loadLawDetails(lawId);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Government Blockchain - Interface Web</title>
+    <link rel="stylesheet" href="/src/styles/index.css">
+    <style>
+        /* Styles inline pour le démo */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8fafc;
+            color: #0f172a;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: #2563eb;
+            color: white;
+            padding: 2rem 0;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .status-card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .feature-card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15);
+        }
+        
+        .feature-card h3 {
+            color: #2563eb;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+        
+        .feature-card p {
+            color: #64748b;
+            margin-bottom: 1.5rem;
+        }
+        
+        .btn {
+            background: #2563eb;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn:hover {
+            background: #1d4ed8;
+        }
+        
+        .btn.disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+        
+        .footer {
+            background: #1e293b;
+            color: white;
+            text-align: center;
+            padding: 2rem;
+            margin-top: 3rem;
+        }
+        
+        .api-status {
+            margin: 1rem 0;
+            padding: 1rem;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        
+        .api-status.online {
+            background: #ecfdf5;
+            color: #059669;
+            border: 1px solid #a7f3d0;
+        }
+        
+        .api-status.offline {
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+        
+        .demo-section {
+            background: #fffbeb;
+            border: 1px solid #fed7aa;
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .demo-section h2 {
+            color: #d97706;
+            margin-bottom: 1rem;
+        }
+        
+        .nav-demo {
+            display: flex;
+            gap: 1rem;
+            margin: 1rem 0;
+            flex-wrap: wrap;
+        }
+        
+        .nav-demo a {
+            padding: 0.5rem 1rem;
+            background: #f3f4f6;
+            border-radius: 6px;
+            text-decoration: none;
+            color: #374151;
+            font-weight: 500;
+        }
+        
+        .nav-demo a:hover {
+            background: #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>🏛️ E-Government Blockchain</h1>
+        <p>Système de gouvernance décentralisée</p>
+    </header>
+
+    <div class="container">
+        <div class="status-card">
+            <h2>📊 État du système</h2>
+            <div id="api-status" class="api-status offline">
+                🔄 Vérification de la connexion API...
+            </div>
+            <p>Interface web déployée avec succès !</p>
+            <ul style="margin: 1rem 0; padding-left: 2rem;">
+                <li>✅ Interface web fonctionnelle</li>
+                <li>✅ Serveur blockchain démarré</li>
+                <li>✅ Styles CSS chargés</li>
+                <li>🔄 Test de connexion API en cours</li>
+            </ul>
+        </div>
+
+        <div class="demo-section">
+            <h2>🎯 Interface de démonstration</h2>
+            <p>Cette version statique montre l'interface web en attendant la version complète Yew/WebAssembly.</p>
+            
+            <div class="nav-demo">
+                <a href="#" onclick="showSection('auth')">🔐 Authentification</a>
+                <a href="#" onclick="showSection('laws')">📜 Lois</a>
+                <a href="#" onclick="showSection('proposals')">✏️ Propositions</a>
+                <a href="#" onclick="showSection('voting')">🗳️ Votes</a>
+                <a href="#" onclick="showSection('profile')">👤 Profil</a>
+            </div>
+            
+            <div id="demo-content" style="margin-top: 1rem; padding: 1rem; background: white; border-radius: 8px;">
+                <p>Sélectionnez une section ci-dessus pour voir un aperçu de l'interface.</p>
+            </div>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <h3>🔐 Authentification</h3>
+                <p>Système complet de connexion et inscription avec gestion des clés cryptographiques et validation sécurisée.</p>
+                <button class="btn" onclick="testAPI('/api/auth/status')">Tester l'API Auth</button>
+            </div>
+            
+            <div class="feature-card">
+                <h3>📜 Consultation des lois</h3>
+                <p>Interface de recherche et consultation des lois avec filtres avancés et visualisation détaillée.</p>
+                <button class="btn" onclick="testAPI('/api/laws')">Tester l'API Lois</button>
+            </div>
+            
+            <div class="feature-card">
+                <h3>✏️ Propositions</h3>
+                <p>Système de soumission de nouvelles lois et amendements avec formulaires guidés et validation.</p>
+                <button class="btn" onclick="testAPI('/api/proposals')">Tester l'API Propositions</button>
+            </div>
+            
+            <div class="feature-card">
+                <h3>🗳️ Système de vote</h3>
+                <p>Interface de vote démocratique avec résultats en temps réel et historique des votes.</p>
+                <button class="btn" onclick="testAPI('/api/voting')">Tester l'API Votes</button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>🏛️ E-Government Blockchain System</p>
+        <p>Interface web développée avec Yew (Rust + WebAssembly)</p>
+        <p>Version démo - Septembre 2025</p>
+    </footer>
+
+    <script>
+        // Test de connexion API
+        async function checkAPIStatus() {
+            const statusElement = document.getElementById('api-status');
+            try {
+                const response = await fetch('/api/health');
+                if (response.ok) {
+                    statusElement.className = 'api-status online';
+                    statusElement.innerHTML = '✅ API Blockchain connectée';
+                } else {
+                    throw new Error('API non disponible');
+                }
+            } catch (error) {
+                statusElement.className = 'api-status offline';
+                statusElement.innerHTML = '❌ API Blockchain déconnectée (probablement normal en démo)';
+            }
+        }
+
+        // Test d'endpoints API
+        async function testAPI(endpoint) {
+            try {
+                const response = await fetch(endpoint);
+                const data = await response.text();
+                alert(`Test ${endpoint}:\nStatut: ${response.status}\nRéponse: ${data.substring(0, 200)}...`);
+            } catch (error) {
+                alert(`Erreur lors du test ${endpoint}:\n${error.message}`);
+            }
+        }
+
+        // Démonstration des sections
+        function showSection(section) {
+            const content = document.getElementById('demo-content');
+            const sections = {
+                auth: `
+                    <h3>🔐 Authentification</h3>
+                    <p>Cette section contiendrait :</p>
+                    <ul>
+                        <li>Formulaire de connexion avec validation</li>
+                        <li>Formulaire d'inscription</li>
+                        <li>Gestion des sessions</li>
+                        <li>Génération de clés cryptographiques</li>
+                    </ul>
+                `,
+                laws: `
+                    <h3>📜 Consultation des lois</h3>
+                    <p>Cette section contiendrait :</p>
+                    <ul>
+                        <li>Liste paginée des lois</li>
+                        <li>Recherche textuelle</li>
+                        <li>Filtres par catégorie et statut</li>
+                        <li>Visualisation détaillée avec modal</li>
+                    </ul>
+                `,
+                proposals: `
+                    <h3>✏️ Propositions</h3>
+                    <p>Cette section contiendrait :</p>
+                    <ul>
+                        <li>Formulaire de soumission</li>
+                        <li>Choix nouvelle loi / amendement</li>
+                        <li>Validation et prévisualisation</li>
+                        <li>Suivi des propositions</li>
+                    </ul>
+                `,
+                voting: `
+                    <h3>🗳️ Système de vote</h3>
+                    <p>Cette section contiendrait :</p>
+                    <ul>
+                        <li>Liste des propositions en vote</li>
+                        <li>Interface de vote Pour/Contre/Abstention</li>
+                        <li>Résultats en temps réel</li>
+                        <li>Historique des votes</li>
+                    </ul>
+                `,
+                profile: `
+                    <h3>👤 Profil utilisateur</h3>
+                    <p>Cette section contiendrait :</p>
+                    <ul>
+                        <li>Informations personnelles</li>
+                        <li>Système de réputation</li>
+                        <li>Historique d'activité</li>
+                        <li>Statistiques personnelles</li>
+                    </ul>
+                `
+            };
+            
+            content.innerHTML = sections[section] || '<p>Section non trouvée</p>';
+        }
+
+        // Vérifier l'API au chargement
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAPIStatus();
+            
+            // Rechecker toutes les 30 secondes
+            setInterval(checkAPIStatus, 30000);
+        });
+    </script>
+</body>
+</html>

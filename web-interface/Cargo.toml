@@ -1,0 +1,32 @@
+[package]
+name = "web-interface"
+version.workspace = true
+edition.workspace = true
+description = "Interface web pour le système e-gouvernement"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Modules locaux
+common = { path = "../common" }
+crypto-lib = { path = "../crypto-lib" }
+
+# Yew et Web
+yew = { workspace = true }
+gloo = { workspace = true }
+wasm-bindgen = { workspace = true }
+web-sys = { workspace = true }
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+
+# Sérialisation
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP client pour WASM
+reqwest = { version = "0.11", features = ["json"] }
+
+# Utilitaires
+uuid = { workspace = true }
+chrono = { workspace = true }

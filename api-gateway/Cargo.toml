@@ -1,0 +1,58 @@
+[package]
+name = "api-gateway"
+version.workspace = true
+edition.workspace = true
+description = "Passerelle API pour le système e-gouvernement"
+
+[[bin]]
+name = "api-gateway"
+path = "src/main.rs"
+
+[[bin]]
+name = "api-gateway-persistent"
+path = "src/main-persistent.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Modules locaux
+common = { path = "../common" }
+crypto-lib = { path = "../crypto-lib" }
+
+# API et réseau
+axum = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tower-http = { workspace = true, features = ["trace", "cors"] }
+reqwest = { version = "0.11", features = ["json"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Authentification JWT
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+base64 = "0.21"
+
+# Base de données
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+
+# Cryptographie et sécurité
+argon2 = "0.5"
+aes-gcm = "0.10"
+rand = "0.8"
+hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
+
+# HTTP et middleware
+http = "1.0"
+
+[dev-dependencies]
+axum-test = "15.7"
+tokio-test = "0.4"
+futures = "0.3"

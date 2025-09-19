@@ -1,0 +1,86 @@
+# Dockerfile de debug pour blockchain server
+FROM rustlang/rust:nightly-slim AS builder
+
+# Installer les dépendances système
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    libsqlite3-dev \
+    build-essential \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Créer utilisateur et workspace
+RUN useradd -m -u 1000 rustuser
+RUN mkdir -p /app && chown rustuser:rustuser /app
+WORKDIR /app
+USER rustuser
+
+# Copier les fichiers de config Cargo
+COPY --chown=rustuser:rustuser Cargo.toml Cargo.lock ./
+COPY --chown=rustuser:rustuser crypto-lib/Cargo.toml ./crypto-lib/
+COPY --chown=rustuser:rustuser common/Cargo.toml ./common/
+COPY --chown=rustuser:rustuser blockchain-server/Cargo.toml ./blockchain-server/
+COPY --chown=rustuser:rustuser api-gateway/Cargo.toml ./api-gateway/
+COPY --chown=rustuser:rustuser tests/Cargo.toml ./tests/
+
+# Créer sources dummy pour cache des dépendances
+RUN mkdir -p crypto-lib/src common/src blockchain-server/src api-gateway/src tests/src && \
+    echo "pub fn lib() {}" > crypto-lib/src/lib.rs && \
+    echo "pub fn lib() {}" > common/src/lib.rs && \
+    echo "fn main() { println!(\"Hello from dummy main\"); }" > blockchain-server/src/main.rs && \
+    echo "fn main() {}" > api-gateway/src/main.rs && \
+    echo "pub fn lib() {}" > tests/src/lib.rs
+
+# Précompiler les dépendances
+RUN cargo build --release --bin blockchain-server
+
+# Supprimer les sources dummy
+RUN rm -rf crypto-lib/src common/src blockchain-server/src api-gateway/src tests/src
+
+# Copier le code source réel
+COPY --chown=rustuser:rustuser . .
+
+# DEBUG: Vérifier que les fichiers sont là
+RUN ls -la blockchain-server/src/
+
+# Compiler avec des infos de debug
+RUN RUST_BACKTRACE=full cargo build --release --bin blockchain-server
+
+# Stage runtime
+FROM debian:bookworm-slim AS runtime
+
+# Installer dépendances runtime + outils de debug
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    libsqlite3-0 \
+    ca-certificates \
+    curl \
+    strace \
+    gdb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Créer utilisateur
+RUN useradd -m -u 1000 rustuser
+USER rustuser
+WORKDIR /app
+
+# Créer répertoires
+RUN mkdir -p /app/data /app/logs
+
+# Copier le binaire
+COPY --from=builder --chown=rustuser:rustuser /app/target/release/blockchain-server /app/blockchain-server
+
+# DEBUG: Vérifier que le binaire est exécutable
+RUN ls -la /app/blockchain-server
+
+# Exposer le port
+EXPOSE 8080
+
+# Variables d'environnement pour debug
+ENV RUST_BACKTRACE=full
+ENV RUST_LOG=debug
+
+# Commande de démarrage avec debug
+CMD ["sh", "-c", "echo 'Starting blockchain server...' && /app/blockchain-server"]

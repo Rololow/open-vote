@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Government Blockchain - Système de gouvernance décentralisée</title>
+    <meta name="description" content="Système de gouvernance démocratique basé sur la blockchain permettant la participation citoyenne, le vote sur les lois et la transparence des processus gouvernementaux.">
+    <meta name="keywords" content="blockchain, e-government, démocratie, gouvernance, vote, lois, participation citoyenne">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>">
+    
+    <!-- Redirection vers la nouvelle interface -->
+    <script>
+        // Rediriger vers la nouvelle interface interactive
+        if (window.location.pathname === '/' || window.location.pathname === '/index.html') {
+            window.location.href = '/app.html';
+        }
+    </script>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="/src/styles/index.css">
+    
+    <!-- Preconnect pour les performances -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    
+    <!-- Meta tags pour les réseaux sociaux -->
+    <meta property="og:title" content="E-Government Blockchain">
+    <meta property="og:description" content="Système de gouvernance démocratique basé sur la blockchain">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="/assets/og-image.png">
+    
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="E-Government Blockchain">
+    <meta name="twitter:description" content="Système de gouvernance démocratique basé sur la blockchain">
+    
+    <!-- Thème couleur pour les navigateurs mobiles -->
+    <meta name="theme-color" content="#2563eb">
+    <meta name="msapplication-TileColor" content="#2563eb">
+    
+    <!-- Configuration PWA (pour une future implémentation) -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="E-Government">
+    
+    <!-- CSS de base intégré pour éviter le FOUC (Flash of Unstyled Content) -->
+    <style>
+        /* Reset minimal et loading state */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        html {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.5;
+        }
+        
+        body {
+            background-color: #f8fafc;
+            color: #0f172a;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        /* Loading spinner initial */
+        .app-loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            z-index: 9999;
+        }
+        
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #e2e8f0;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+        
+        .loading-text {
+            color: #64748b;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        /* Masquer le loading une fois l'app chargée */
+        .app-loaded .app-loading {
+            display: none;
+        }
+        
+        /* Style de base pour le conteneur principal */
+        #app {
+            min-height: 100vh;
+        }
+        
+        /* Styles d'accessibilité */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+            
+            .loading-spinner {
+                animation: none;
+                border-top-color: #2563eb;
+            }
+        }
+        
+        /* Mode sombre par défaut si préféré par l'utilisateur */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #0f172a;
+                color: #f8fafc;
+            }
+            
+            .app-loading {
+                background: #0f172a;
+            }
+            
+            .loading-spinner {
+                border-color: #334155;
+                border-top-color: #3b82f6;
+            }
+            
+            .loading-text {
+                color: #94a3b8;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading initial pendant le chargement de l'application -->
+    <div class="app-loading">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Chargement de l'application...</div>
+    </div>
+    
+    <!-- Conteneur principal pour l'application Yew -->
+    <div id="app"></div>
+    
+    <!-- Messages pour les navigateurs non supportés -->
+    <noscript>
+        <div style="padding: 2rem; text-align: center; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 8px; margin: 2rem;">
+            <h2>JavaScript requis</h2>
+            <p>Cette application nécessite JavaScript pour fonctionner. Veuillez activer JavaScript dans votre navigateur et recharger la page.</p>
+        </div>
+    </noscript>
+    
+    <!-- Script pour masquer le loading une fois l'app chargée -->
+    <script>
+        // Masquer le loading une fois que l'application Yew est montée
+        function hideLoading() {
+            document.body.classList.add('app-loaded');
+        }
+        
+        // Observer pour détecter quand l'application est prête
+        const observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.type === 'childList') {
+                    const appElement = document.getElementById('app');
+                    if (appElement && appElement.children.length > 0) {
+                        // L'application est montée
+                        setTimeout(hideLoading, 100); // Petit délai pour éviter le flash
+                        observer.disconnect();
+                    }
+                }
+            });
+        });
+        
+        // Commencer à observer
+        observer.observe(document.getElementById('app'), {
+            childList: true,
+            subtree: true
+        });
+        
+        // Fallback: masquer le loading après 5 secondes maximum
+        setTimeout(hideLoading, 5000);
+        
+        // Gérer les erreurs JavaScript
+        window.addEventListener('error', function(e) {
+            console.error('Erreur JavaScript:', e.error);
+            hideLoading();
+            
+            // Afficher un message d'erreur à l'utilisateur
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = `
+                position: fixed;
+                top: 1rem;
+                right: 1rem;
+                background: #fef2f2;
+                color: #dc2626;
+                padding: 1rem;
+                border: 1px solid #fecaca;
+                border-radius: 8px;
+                max-width: 400px;
+                z-index: 10000;
+            `;
+            errorDiv.innerHTML = `
+                <strong>Erreur d'application</strong><br>
+                Une erreur s'est produite. Veuillez recharger la page.
+                <button onclick="location.reload()" style="margin-left: 1rem; padding: 0.25rem 0.5rem; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    Recharger
+                </button>
+            `;
+            document.body.appendChild(errorDiv);
+        });
+        
+        // Gérer les promesses rejetées
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('Promise rejetée:', e.reason);
+        });
+    </script>
+</body>
+</html>

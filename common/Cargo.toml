@@ -1,0 +1,13 @@
+[package]
+name = "common"
+version.workspace = true
+edition.workspace = true
+description = "Types et structures communes pour le système e-gouvernement"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+crypto-lib = { path = "../crypto-lib" }
+thiserror = { workspace = true }

@@ -1,0 +1,40 @@
+[workspace]
+members = [
+    "blockchain-server",
+    "api-gateway", 
+    "crypto-lib",
+    "common",
+    "tests"
+]
+resolver = "2"
+
+[workspace.dependencies]
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.6", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+ed25519-dalek = "2.0"
+rand = "0.8"
+hex = "0.4"
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Web dependencies
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Database
+sqlite = "0.32"
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Votre nom <votre.email@example.com>"]
+description = "Système d'e-gouvernement décentralisé basé sur blockchain"
+license = "MIT OR Apache-2.0"

@@ -1,0 +1,34 @@
+services:
+  blockchain-server:
+    build: 
+      context: .
+      dockerfile: Dockerfile.blockchain
+    container_name: egovern-blockchain
+    ports:
+      - "8080:8080"
+    volumes:
+      - blockchain_data:/app/data
+      - blockchain_logs:/app/logs
+    environment:
+      - RUST_LOG=debug
+      - BLOCKCHAIN_DATABASE_URL=sqlite:///app/data/blockchain.db
+      - BLOCKCHAIN_BIND_ADDRESS=0.0.0.0
+      - BLOCKCHAIN_DATA_DIR=/app/data
+    restart: unless-stopped
+    command: ["/app/blockchain-server"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  blockchain_data:
+    driver: local
+  blockchain_logs:
+    driver: local
+
+networks:
+  default:
+    name: egovern-network

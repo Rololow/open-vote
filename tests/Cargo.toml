@@ -1,0 +1,18 @@
+[package]
+name = "integration-tests"
+version.workspace = true
+edition.workspace = true
+description = "Tests d'intégration pour le système e-gouvernement"
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests.rs"
+
+[dependencies]
+tokio = { workspace = true }
+common = { path = "../common" }
+crypto-lib = { path = "../crypto-lib" }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"

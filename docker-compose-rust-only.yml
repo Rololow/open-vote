@@ -1,0 +1,81 @@
+# Docker Compose pour serveur blockchain Rust uniquement
+# Compilation et exécution complète dans Docker
+
+version: '3.8'
+
+services:
+  # === SERVICE PRINCIPAL: Serveur Blockchain Rust ===
+  blockchain-rust:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust-only
+      # Arguments de build pour optimiser la compilation
+      args:
+        - RUSTFLAGS="-C target-cpu=native"
+    container_name: blockchain-rust-server
+    ports:
+      - "8080:8080"    # API principale
+    environment:
+      - RUST_LOG=info
+      - DATABASE_URL=sqlite:/app/data/blockchain.db
+      - PORT=8080
+    volumes:
+      # Volume persistant pour la base de données SQLite
+      - blockchain_data:/app/data
+      # Logs persistants
+      - blockchain_logs:/app/logs
+    networks:
+      - blockchain_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Limites de ressources
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+
+  # === SERVICE UTILITAIRE: Mock Server Python (optionnel pour migration) ===
+  mock-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-server
+    container_name: mock-server-migration
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    networks:
+      - blockchain_network
+    restart: unless-stopped
+    profiles:
+      - migration  # Démarrer seulement avec --profile migration
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/laws"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# === VOLUMES PERSISTANTS ===
+volumes:
+  blockchain_data:
+    name: blockchain_sqlite_data
+    driver: local
+  blockchain_logs:
+    name: blockchain_logs
+    driver: local
+
+# === RÉSEAU ===
+networks:
+  blockchain_network:
+    name: blockchain_rust_network
+    driver: bridge

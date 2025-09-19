@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion - E-Government Blockchain</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔐</text></svg>">
+    
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+        
+        .login-container {
+            background: white;
+            border-radius: 20px;
+            padding: 3rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 450px;
+            margin: 2rem;
+        }
+        
+        .logo {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .logo-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        
+        .logo-title {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 0.5rem;
+        }
+        
+        .logo-subtitle {
+            color: #6b7280;
+            font-size: 1rem;
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #374151;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 1rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #4338ca;
+            box-shadow: 0 0 0 3px rgba(67, 56, 202, 0.1);
+        }
+        
+        .form-select {
+            width: 100%;
+            padding: 1rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 1rem;
+            background: white;
+            cursor: pointer;
+        }
+        
+        .login-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #4338ca, #3730a3);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            margin-bottom: 1rem;
+        }
+        
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(67, 56, 202, 0.2);
+        }
+        
+        .login-btn:active {
+            transform: translateY(0);
+        }
+        
+        .register-btn {
+            width: 100%;
+            background: transparent;
+            color: #4338ca;
+            border: 2px solid #4338ca;
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .register-btn:hover {
+            background: #4338ca;
+            color: white;
+        }
+        
+        .form-toggle {
+            text-align: center;
+            margin: 2rem 0 1rem 0;
+            color: #6b7280;
+        }
+        
+        .toggle-link {
+            color: #4338ca;
+            text-decoration: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .toggle-link:hover {
+            text-decoration: underline;
+        }
+        
+        .error-message {
+            background: #fef2f2;
+            color: #dc2626;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+        
+        .success-message {
+            background: #f0fdf4;
+            color: #166534;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            color: #6b7280;
+            margin: 1rem 0;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e5e7eb;
+            border-top-color: #4338ca;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .demo-accounts {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 2rem;
+            border: 1px solid #e5e7eb;
+        }
+        
+        .demo-title {
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        
+        .demo-account {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        
+        .demo-account:hover {
+            background: #f3f4f6;
+        }
+        
+        .demo-info {
+            flex: 1;
+        }
+        
+        .demo-name {
+            font-weight: 500;
+            color: #1f2937;
+        }
+        
+        .demo-role {
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+        
+        .demo-reputation {
+            background: #ede9fe;
+            color: #5b21b6;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        @media (max-width: 640px) {
+            .login-container {
+                margin: 1rem;
+                padding: 2rem;
+            }
+            
+            .logo-title {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <div class="logo-icon">🏛️</div>
+            <h1 class="logo-title">E-Government</h1>
+            <p class="logo-subtitle">Gouvernance Blockchain</p>
+        </div>
+        
+        <div class="error-message" id="error-message"></div>
+        <div class="success-message" id="success-message"></div>
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <span>Connexion en cours...</span>
+        </div>
+        
+        <!-- Formulaire de connexion -->
+        <form id="login-form">
+            <div class="form-group">
+                <label class="form-label" for="email">Email ou Nom d'utilisateur</label>
+                <input type="text" id="email" class="form-input" placeholder="Entrez votre email" required>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label" for="password">Mot de passe</label>
+                <input type="password" id="password" class="form-input" placeholder="Entrez votre mot de passe" required>
+            </div>
+            
+            <button type="submit" class="login-btn">
+                🔐 Se connecter
+            </button>
+        </form>
+        
+        <!-- Formulaire d'inscription (caché par défaut) -->
+        <form id="register-form" style="display: none;">
+            <div class="form-group">
+                <label class="form-label" for="reg-name">Nom complet</label>
+                <input type="text" id="reg-name" class="form-input" placeholder="Votre nom complet" required>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label" for="reg-email">Email</label>
+                <input type="email" id="reg-email" class="form-input" placeholder="votre@email.com" required>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label" for="reg-password">Mot de passe</label>
+                <input type="password" id="reg-password" class="form-input" placeholder="Créez un mot de passe" required>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label" for="reg-role">Rôle</label>
+                <select id="reg-role" class="form-select" required>
+                    <option value="">Sélectionnez votre rôle</option>
+                    <option value="citizen">Citoyen</option>
+                    <option value="representative">Représentant</option>
+                    <option value="administrator">Administrateur</option>
+                </select>
+            </div>
+            
+            <button type="submit" class="login-btn">
+                ✨ Créer un compte
+            </button>
+        </form>
+        
+        <div class="form-toggle">
+            <span id="toggle-text">Pas encore de compte ?</span>
+            <a href="#" class="toggle-link" id="toggle-link" onclick="toggleForm()">S'inscrire</a>
+        </div>
+        
+        <!-- Comptes de démonstration -->
+        <div class="demo-accounts">
+            <div class="demo-title">🎯 Comptes de Démonstration</div>
+            
+            <div class="demo-account" onclick="loginWithDemo('marie@example.com', 'Marie Dupont')">
+                <div class="demo-info">
+                    <div class="demo-name">Marie Dupont</div>
+                    <div class="demo-role">Citoyenne • marie@example.com</div>
+                </div>
+                <div class="demo-reputation">Rep: 85</div>
+            </div>
+            
+            <div class="demo-account" onclick="loginWithDemo('jean@example.com', 'Jean Martin')">
+                <div class="demo-info">
+                    <div class="demo-name">Jean Martin</div>
+                    <div class="demo-role">Représentant • jean@example.com</div>
+                </div>
+                <div class="demo-reputation">Rep: 92</div>
+            </div>
+            
+            <div class="demo-account" onclick="loginWithDemo('admin@example.com', 'Administrateur')">
+                <div class="demo-info">
+                    <div class="demo-name">Administrateur</div>
+                    <div class="demo-role">Admin Système • admin@example.com</div>
+                </div>
+                <div class="demo-reputation">Rep: 100</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080';
+        let isLoginMode = true;
+
+        // Gestion du toggle login/register
+        function toggleForm() {
+            const loginForm = document.getElementById('login-form');
+            const registerForm = document.getElementById('register-form');
+            const toggleText = document.getElementById('toggle-text');
+            const toggleLink = document.getElementById('toggle-link');
+            
+            if (isLoginMode) {
+                loginForm.style.display = 'none';
+                registerForm.style.display = 'block';
+                toggleText.textContent = 'Déjà un compte ?';
+                toggleLink.textContent = 'Se connecter';
+                isLoginMode = false;
+            } else {
+                loginForm.style.display = 'block';
+                registerForm.style.display = 'none';
+                toggleText.textContent = 'Pas encore de compte ?';
+                toggleLink.textContent = 'S\'inscrire';
+                isLoginMode = true;
+            }
+            
+            clearMessages();
+        }
+
+        // Messages d'erreur et succès
+        function showError(message) {
+            const errorEl = document.getElementById('error-message');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        function showSuccess(message) {
+            const successEl = document.getElementById('success-message');
+            successEl.textContent = message;
+            successEl.style.display = 'block';
+            document.getElementById('error-message').style.display = 'none';
+        }
+
+        function clearMessages() {
+            document.getElementById('error-message').style.display = 'none';
+            document.getElementById('success-message').style.display = 'none';
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        // Connexion avec compte de démo
+        function loginWithDemo(email, name) {
+            document.getElementById('email').value = email;
+            document.getElementById('password').value = 'demo123';
+            
+            // Simuler une connexion
+            showLoading(true);
+            clearMessages();
+            
+            setTimeout(() => {
+                showLoading(false);
+                
+                // Stocker les informations utilisateur
+                const userData = {
+                    email: email,
+                    name: name,
+                    loginTime: new Date().toISOString(),
+                    role: email.includes('admin') ? 'administrator' : (email.includes('jean') ? 'representative' : 'citizen'),
+                    reputation: email.includes('admin') ? 100 : (email.includes('jean') ? 92 : 85)
+                };
+                
+                localStorage.setItem('currentUser', JSON.stringify(userData));
+                localStorage.setItem('isLoggedIn', 'true');
+                
+                showSuccess(`Connexion réussie ! Bienvenue ${name}`);
+                
+                // Rediriger vers l'application
+                setTimeout(() => {
+                    window.location.href = '/app.html';
+                }, 1500);
+            }, 2000);
+        }
+
+        // Configuration API
+        const API_BASE_URL = 'http://localhost:5000/api';
+
+        // Gestion de la connexion
+        document.getElementById('login-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            if (!email || !password) {
+                showError('Veuillez remplir tous les champs');
+                return;
+            }
+            
+            showLoading(true);
+            clearMessages();
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Sauvegarder les informations utilisateur
+                    localStorage.setItem('userToken', data.user.token);
+                    localStorage.setItem('userInfo', JSON.stringify(data.user));
+                    localStorage.setItem('isLoggedIn', 'true');
+                    localStorage.setItem('currentUser', JSON.stringify(data.user));
+                    
+                    showSuccess(`Connexion réussie ! Bienvenue ${data.user.name}`);
+                    
+                    setTimeout(() => {
+                        window.location.href = 'app.html';
+                    }, 1500);
+                } else {
+                    showError(data.error || 'Erreur de connexion');
+                }
+            } catch (error) {
+                console.error('Erreur de connexion:', error);
+                showError('Erreur de connexion au serveur');
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        // Gestion de l'inscription
+        document.getElementById('register-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const name = document.getElementById('reg-name').value;
+            const email = document.getElementById('reg-email').value;
+            const password = document.getElementById('reg-password').value;
+            const role = document.getElementById('reg-role').value;
+            
+            if (!name || !email || !password || !role) {
+                showError('Veuillez remplir tous les champs');
+                return;
+            }
+            
+            if (password.length < 6) {
+                showError('Le mot de passe doit contenir au moins 6 caractères');
+                return;
+            }
+            
+            showLoading(true);
+            clearMessages();
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        email: email,
+                        password: password,
+                        role: role
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Sauvegarder les informations utilisateur
+                    localStorage.setItem('userToken', data.user.token);
+                    localStorage.setItem('userInfo', JSON.stringify(data.user));
+                    localStorage.setItem('isLoggedIn', 'true');
+                    localStorage.setItem('currentUser', JSON.stringify(data.user));
+                    
+                    showSuccess(`Compte créé avec succès ! Bienvenue ${data.user.name}`);
+                    
+                    // Auto-connexion après inscription
+                    setTimeout(() => {
+                        window.location.href = 'app.html';
+                    }, 2000);
+                } else {
+                    showError(data.error || 'Erreur lors de la création du compte');
+                }
+            } catch (error) {
+                console.error('Erreur d\'inscription:', error);
+                showError('Erreur de connexion au serveur');
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        // Vérifier si l'utilisateur est déjà connecté
+        document.addEventListener('DOMContentLoaded', function() {
+            if (localStorage.getItem('isLoggedIn') === 'true') {
+                const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+                if (user.name) {
+                    showSuccess(`Déjà connecté en tant que ${user.name}`);
+                    setTimeout(() => {
+                        window.location.href = '/app.html';
+                    }, 1500);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

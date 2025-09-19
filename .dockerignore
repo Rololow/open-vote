@@ -1,0 +1,22 @@
+# Ignorer les fichiers qui n'ont pas besoin d'être dans l'image Docker
+target/
+.git/
+.gitignore
+*.md
+.vscode/
+simple-test/
+logs/
+data/*.db
+data/*.log
+
+# Fichiers Windows spécifiques
+*.ps1
+setup.ps1
+start-all.ps1
+
+# Caches et temporaires
+.cargo/
+node_modules/
+.env.local
+.DS_Store
+Thumbs.db
