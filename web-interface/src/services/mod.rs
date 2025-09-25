@@ -1,3 +1,3 @@
-// Services pour les appels API (placeholder)
-pub mod api_service;
-pub mod crypto_service;
+pub mod blockchain_service;
+
+pub use blockchain_service::BlockchainService;

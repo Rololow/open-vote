@@ -1,7 +1,24 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use crypto_lib::Hash;
-use crate::{Block, Transaction, Account, Law, Vote, BlockchainError, Result};
+use std::collections::{HashMap, HashSet};
+use crate::{Block, Transaction, Account, Law, Vote, BlockchainError, Result, proposal::Proposal};
+use uuid::Uuid;
+use chrono::{DateTime, Utc};
+use crypto_lib::Signature;
+
+/// Attestation de vérification liée à un compte (sans PII)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifiedAttestation {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub national_id_hash: String,
+    pub country_code: String,
+    pub scheme: String,
+    pub issuer_id: String,
+    pub evidence_hash: String,
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub issuer_signature: Signature,
+}
 
 /// État de la blockchain e-gouvernement
 #[derive(Debug, Clone)]
@@ -10,6 +27,15 @@ pub struct Blockchain {
     pub accounts: HashMap<uuid::Uuid, Account>,
     pub laws: HashMap<uuid::Uuid, Law>,
     pub votes: HashMap<uuid::Uuid, Vec<Vote>>, // Votes par loi
+    pub proposals: HashMap<uuid::Uuid, Proposal>,
+    /// Ensemble des supporters par proposition (clé publique unique)
+    pub proposal_supporters: HashMap<uuid::Uuid, HashSet<String>>, // hex(pubkey)
+    /// Attestations de vérification actives par compte (plusieurs attestations possibles)
+    pub verifications_by_account: HashMap<uuid::Uuid, Vec<VerifiedAttestation>>,
+    /// Index des attestations par identifiant d'attestation
+    pub verifications_by_id: HashMap<uuid::Uuid, VerifiedAttestation>,
+    /// Index d'unicité identité → compte
+    pub identity_index: HashMap<String, uuid::Uuid>,
     pub pending_transactions: Vec<Transaction>,
     pub difficulty: u32,
     pub block_reward: u64,
@@ -53,10 +79,44 @@ impl Blockchain {
             accounts: HashMap::new(),
             laws: HashMap::new(),
             votes: HashMap::new(),
+            proposals: HashMap::new(),
+            proposal_supporters: HashMap::new(),
+            verifications_by_account: HashMap::new(),
+            verifications_by_id: HashMap::new(),
+            identity_index: HashMap::new(),
             pending_transactions: Vec::new(),
             difficulty: 1,
             block_reward: 100,
         }
+    }
+
+    /// Reconstruit l'état (comptes, lois, votes, propositions, supporters) à partir des blocs
+    /// en rejouant toutes les transactions. À utiliser après chargement des blocs depuis le stockage.
+    pub fn rebuild_state_from_blocks(&mut self) -> Result<()> {
+        // Réinitialiser l'état (conserver les blocs tels que chargés)
+        self.accounts.clear();
+        self.laws.clear();
+        self.votes.clear();
+        self.proposals.clear();
+        self.proposal_supporters.clear();
+        self.verifications_by_account.clear();
+        self.verifications_by_id.clear();
+        self.identity_index.clear();
+        self.pending_transactions.clear();
+
+        // Pour éviter les conflits d'emprunt, collecter toutes les transactions
+        let all_txs: Vec<_> = self
+            .blocks
+            .iter()
+            .flat_map(|b| b.transactions.clone())
+            .collect();
+
+        for tx in all_txs.iter() {
+            // Appliquer chaque transaction pour reconstruire l'état
+            self.apply_transaction(tx)?;
+        }
+
+        Ok(())
     }
     
     /// Obtient le dernier bloc
@@ -184,6 +244,12 @@ impl Blockchain {
                         "Compte déjà existant".to_string()
                     ));
                 }
+                // Unicité par clé publique: empêcher plusieurs comptes avec la même clé
+                if self.accounts.values().any(|a| a.public_key == account.public_key) {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Clé publique déjà utilisée par un autre compte".to_string(),
+                    ));
+                }
                 self.accounts.insert(account.id, account.clone());
             }
             
@@ -239,6 +305,125 @@ impl Blockchain {
                     account.reputation = *new_reputation;
                 } else {
                     return Err(BlockchainError::AccountNotFound(account_id.to_string()));
+                }
+            }
+
+            // ===== Propositions citoyennes =====
+            TransactionType::CreateProposal(proposal) => {
+                if self.proposals.contains_key(&proposal.id) {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Proposition déjà existante".to_string(),
+                    ));
+                }
+                self.proposals.insert(proposal.id, proposal.clone());
+                self.proposal_supporters.insert(proposal.id, HashSet::new());
+            }
+
+            TransactionType::SupportProposal { proposal_id, supporter } => {
+                // La proposition doit exister
+                if !self.proposals.contains_key(proposal_id) {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Proposition introuvable".to_string(),
+                    ));
+                }
+                // Ne pas accepter de soutiens si expirée
+                if let Some(p) = self.proposals.get(proposal_id) {
+                    if p.expires_at <= Utc::now() {
+                        return Err(BlockchainError::InvalidTransaction(
+                            "Proposition expirée".to_string(),
+                        ));
+                    }
+                }
+                // Un même supporter (clé publique) ne peut soutenir qu'une fois
+                let pk_hex = supporter.to_hex();
+                let entry = self.proposal_supporters.entry(*proposal_id).or_default();
+                if entry.contains(&pk_hex) {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Support déjà enregistré pour cet utilisateur".to_string(),
+                    ));
+                }
+                entry.insert(pk_hex);
+                // Mettre à jour le compteur pratique
+                if let Some(p) = self.proposals.get_mut(proposal_id) {
+                    p.supporters_count = p.supporters_count.saturating_add(1);
+                    // Promotion automatique en loi à 100 soutiens
+                    if p.supporters_count >= 100 {
+                        // Créer une loi basique à partir de la proposition
+                        let author = transaction.sender.clone();
+                        let mut new_law = crate::Law::new(
+                            p.title.clone(),
+                            p.full_text.clone(),
+                            p.description.clone(),
+                            p.category.clone(),
+                            author,
+                            crate::law::LawChangeType::Creation,
+                        );
+                        new_law.status = crate::law::LawStatus::Active;
+                        self.laws.insert(new_law.id, new_law);
+                    }
+                }
+            }
+
+            // ===== Vérification des comptes =====
+            TransactionType::VerifyAccount(att) => {
+                // Le compte doit exister
+                let Some(account) = self.accounts.get_mut(&att.account_id) else {
+                    return Err(BlockchainError::AccountNotFound(att.account_id.to_string()));
+                };
+                // Unicité: ce hash ne doit pas être pris par un autre compte
+                if let Some(owner) = self.identity_index.get(&att.national_id_hash) {
+                    if owner != &att.account_id {
+                        return Err(BlockchainError::InvalidTransaction(
+                            "Identité déjà liée à un autre compte".to_string(),
+                        ));
+                    }
+                }
+                // Vérifier expiration
+                if let Some(exp) = att.expires_at {
+                    if exp <= Utc::now() {
+                        return Err(BlockchainError::InvalidTransaction(
+                            "Attestation expirée".to_string(),
+                        ));
+                    }
+                }
+                // Pour une v1, on suppose la signature de l'issuer déjà validée à l'entrée
+                account.metadata.verified = true;
+                self.identity_index.insert(att.national_id_hash.clone(), att.account_id);
+                self.verifications_by_account
+                    .entry(att.account_id)
+                    .or_default()
+                    .push(att.clone());
+                self.verifications_by_id.insert(att.id, att.clone());
+            }
+
+            TransactionType::RevokeVerification { attestation_id, reason: _ } => {
+                // Trouver l'attestation par id
+                let Some(att) = self.verifications_by_id.remove(attestation_id) else {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Attestation introuvable".to_string(),
+                    ));
+                };
+
+                // Retirer des attestations du compte
+                if let Some(list) = self.verifications_by_account.get_mut(&att.account_id) {
+                    list.retain(|a| a.id != att.id);
+                    // Si plus aucune attestation, marquer non vérifié
+                    if list.is_empty() {
+                        if let Some(acc) = self.accounts.get_mut(&att.account_id) {
+                            acc.metadata.verified = false;
+                        }
+                    }
+                }
+
+                // Mettre à jour l'index d'identité uniquement si aucune autre attestation
+                // avec le même hash n'existe pour ce compte
+                let still_has_same_hash = self
+                    .verifications_by_account
+                    .get(&att.account_id)
+                    .map(|list| list.iter().any(|a| a.national_id_hash == att.national_id_hash))
+                    .unwrap_or(false);
+                if !still_has_same_hash {
+                    self.identity_index.remove(&att.national_id_hash);
                 }
             }
         }

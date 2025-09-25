@@ -3,232 +3,338 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>E-Government Blockchain - Système de gouvernance décentralisée</title>
-    <meta name="description" content="Système de gouvernance démocratique basé sur la blockchain permettant la participation citoyenne, le vote sur les lois et la transparence des processus gouvernementaux.">
-    <meta name="keywords" content="blockchain, e-government, démocratie, gouvernance, vote, lois, participation citoyenne">
-    
-    <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>">
-    
-    <!-- Redirection vers la nouvelle interface -->
-    <script>
-        // Rediriger vers la nouvelle interface interactive
-        if (window.location.pathname === '/' || window.location.pathname === '/index.html') {
-            window.location.href = '/app.html';
-        }
-    </script>
-    
-    <!-- CSS -->
-    <link rel="stylesheet" href="/src/styles/index.css">
-    
-    <!-- Preconnect pour les performances -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    
-    <!-- Meta tags pour les réseaux sociaux -->
-    <meta property="og:title" content="E-Government Blockchain">
-    <meta property="og:description" content="Système de gouvernance démocratique basé sur la blockchain">
-    <meta property="og:type" content="website">
-    <meta property="og:image" content="/assets/og-image.png">
-    
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="E-Government Blockchain">
-    <meta name="twitter:description" content="Système de gouvernance démocratique basé sur la blockchain">
-    
-    <!-- Thème couleur pour les navigateurs mobiles -->
-    <meta name="theme-color" content="#2563eb">
-    <meta name="msapplication-TileColor" content="#2563eb">
-    
-    <!-- Configuration PWA (pour une future implémentation) -->
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="E-Government">
-    
-    <!-- CSS de base intégré pour éviter le FOUC (Flash of Unstyled Content) -->
+    <title>🔗 Analyseur Blockchain E-Government</title>
+
+    <!-- Instruct Trunk to build the Rust crate in this folder to WebAssembly -->
+    <link data-trunk rel="rust" data-bin="blockchain-analyzer-web" />
+
     <style>
-        /* Reset minimal et loading state */
+        :root {
+            --primary-color: #1e3a8a;
+            --secondary-color: #3b82f6;
+            --accent-color: #10b981;
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+            --background-color: #f8fafc;
+            --card-background: #ffffff;
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --border-color: #e5e7eb;
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        }
+
         * {
-            box-sizing: border-box;
             margin: 0;
             padding: 0;
+            box-sizing: border-box;
         }
-        
-        html {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.5;
-        }
-        
+
         body {
-            background-color: #f8fafc;
-            color: #0f172a;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-primary);
+            line-height: 1.6;
         }
-        
-        /* Loading spinner initial */
-        .app-loading {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #f8fafc;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            z-index: 9999;
-        }
-        
-        .loading-spinner {
-            width: 48px;
-            height: 48px;
-            border: 4px solid #e2e8f0;
-            border-top-color: #2563eb;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 1rem;
-        }
-        
-        .loading-text {
-            color: #64748b;
-            font-size: 1rem;
-            font-weight: 500;
-        }
-        
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-        
-        /* Masquer le loading une fois l'app chargée */
-        .app-loaded .app-loading {
-            display: none;
-        }
-        
-        /* Style de base pour le conteneur principal */
-        #app {
+
+        .app {
             min-height: 100vh;
         }
-        
-        /* Styles d'accessibilité */
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after {
-                animation-duration: 0.01ms !important;
-                animation-iteration-count: 1 !important;
-                transition-duration: 0.01ms !important;
-            }
-            
-            .loading-spinner {
-                animation: none;
-                border-top-color: #2563eb;
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 2rem 1rem;
+            text-align: center;
+            box-shadow: var(--shadow);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        .dashboard {
+            display: grid;
+            gap: 2rem;
+        }
+
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .dashboard-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .refresh-button {
+            padding: 0.5rem 1rem;
+            background-color: var(--secondary-color);
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        .refresh-button:hover {
+            background-color: var(--primary-color);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background-color: var(--card-background);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+        }
+
+        .card h3 {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            font-size: 2.25rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 2rem;
+        }
+
+        @media (max-width: 1024px) {
+            .content-grid {
+                grid-template-columns: 1fr;
             }
         }
-        
-        /* Mode sombre par défaut si préféré par l'utilisateur */
-        @media (prefers-color-scheme: dark) {
-            body {
-                background-color: #0f172a;
-                color: #f8fafc;
+
+        .section {
+            background-color: var(--card-background);
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+        }
+
+        .section-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            background-color: #fafbfc;
+        }
+
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table th,
+        .table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .table th {
+            background-color: #f9fafb;
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        .table td {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .table tbody tr:hover {
+            background-color: #f9fafb;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .status-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-pending {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .status-warning {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        .version-badge {
+            display: inline-block;
+            padding: 0.15rem 0.4rem;
+            background-color: #f3f4f6;
+            color: #374151;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border: 1px solid #d1d5db;
+        }
+
+        .tables-container {
+            display: grid;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .table-container {
+            background-color: var(--card-background);
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+        }
+
+        .table-container h3 {
+            padding: 1.5rem;
+            margin: 0;
+            background-color: #fafbfc;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+
+        .error {
+            text-align: center;
+            padding: 2rem;
+            color: var(--danger-color);
+            background-color: #fef2f2;
+            border-radius: 0.5rem;
+            border: 1px solid #fecaca;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid var(--secondary-color);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .connection-status {
+            padding: 0.75rem 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+        }
+
+        .connection-status.connected {
+            background-color: #d1fae5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+
+        .connection-status.disconnected {
+            background-color: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.875rem;
             }
             
-            .app-loading {
-                background: #0f172a;
+            .stats-grid {
+                grid-template-columns: 1fr;
             }
             
-            .loading-spinner {
-                border-color: #334155;
-                border-top-color: #3b82f6;
+            .dashboard-header {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: stretch;
             }
             
-            .loading-text {
-                color: #94a3b8;
+            main {
+                padding: 1rem;
             }
         }
     </style>
 </head>
 <body>
-    <!-- Loading initial pendant le chargement de l'application -->
-    <div class="app-loading">
-        <div class="loading-spinner"></div>
-        <div class="loading-text">Chargement de l'application...</div>
-    </div>
-    
-    <!-- Conteneur principal pour l'application Yew -->
     <div id="app"></div>
-    
-    <!-- Messages pour les navigateurs non supportés -->
-    <noscript>
-        <div style="padding: 2rem; text-align: center; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 8px; margin: 2rem;">
-            <h2>JavaScript requis</h2>
-            <p>Cette application nécessite JavaScript pour fonctionner. Veuillez activer JavaScript dans votre navigateur et recharger la page.</p>
-        </div>
-    </noscript>
-    
-    <!-- Script pour masquer le loading une fois l'app chargée -->
-    <script>
-        // Masquer le loading une fois que l'application Yew est montée
-        function hideLoading() {
-            document.body.classList.add('app-loaded');
-        }
-        
-        // Observer pour détecter quand l'application est prête
-        const observer = new MutationObserver(function(mutations) {
-            mutations.forEach(function(mutation) {
-                if (mutation.type === 'childList') {
-                    const appElement = document.getElementById('app');
-                    if (appElement && appElement.children.length > 0) {
-                        // L'application est montée
-                        setTimeout(hideLoading, 100); // Petit délai pour éviter le flash
-                        observer.disconnect();
-                    }
-                }
-            });
-        });
-        
-        // Commencer à observer
-        observer.observe(document.getElementById('app'), {
-            childList: true,
-            subtree: true
-        });
-        
-        // Fallback: masquer le loading après 5 secondes maximum
-        setTimeout(hideLoading, 5000);
-        
-        // Gérer les erreurs JavaScript
-        window.addEventListener('error', function(e) {
-            console.error('Erreur JavaScript:', e.error);
-            hideLoading();
-            
-            // Afficher un message d'erreur à l'utilisateur
-            const errorDiv = document.createElement('div');
-            errorDiv.style.cssText = `
-                position: fixed;
-                top: 1rem;
-                right: 1rem;
-                background: #fef2f2;
-                color: #dc2626;
-                padding: 1rem;
-                border: 1px solid #fecaca;
-                border-radius: 8px;
-                max-width: 400px;
-                z-index: 10000;
-            `;
-            errorDiv.innerHTML = `
-                <strong>Erreur d'application</strong><br>
-                Une erreur s'est produite. Veuillez recharger la page.
-                <button onclick="location.reload()" style="margin-left: 1rem; padding: 0.25rem 0.5rem; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                    Recharger
-                </button>
-            `;
-            document.body.appendChild(errorDiv);
-        });
-        
-        // Gérer les promesses rejetées
-        window.addEventListener('unhandledrejection', function(e) {
-            console.error('Promise rejetée:', e.reason);
-        });
-    </script>
 </body>
 </html>

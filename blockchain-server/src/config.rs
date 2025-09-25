@@ -3,6 +3,7 @@ use std::env;
 use std::path::Path;
 use anyhow::{Result, Context};
 use uuid::Uuid;
+use tracing::info;
 
 /// Configuration du serveur blockchain
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +19,8 @@ pub struct ServerConfig {
     pub max_block_size: usize,
     pub enable_mining: bool,
     pub log_level: String,
+    /// Liste des DID émetteurs autorisés (did:key:...), séparés par des virgules
+    pub allowed_issuers_dids: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -27,13 +30,16 @@ impl Default for ServerConfig {
             bind_address: "0.0.0.0".to_string(),
             api_port: 8080,
             p2p_port: 8081,
-            database_url: "sqlite:./blockchain.db".to_string(),
+            // Place the SQLite DB inside the data directory which we ensure exists
+            // Use the sqlx-recommended file URL format
+            database_url: "sqlite://./data/blockchain.db".to_string(),
             data_directory: "./data".to_string(),
             max_connections: 100,
             block_time_seconds: 300, // 5 minutes
             max_block_size: 1_000_000, // 1MB
             enable_mining: true,
             log_level: "info".to_string(),
+            allowed_issuers_dids: Vec::new(),
         }
     }
 }
@@ -75,6 +81,16 @@ impl ServerConfig {
                 .context("Valeur mining invalide")?;
         }
 
+        // Liste d'émetteurs autorisés (séparés par des virgules)
+        if let Ok(list) = env::var("ALLOWED_ISSUERS_DIDS") {
+            let items = list
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>();
+            config.allowed_issuers_dids = items;
+        }
+
         // Charger depuis le fichier de configuration si il existe
         let config_path = Path::new("blockchain-config.json");
         if config_path.exists() {
@@ -92,6 +108,36 @@ impl ServerConfig {
         tokio::fs::create_dir_all(&config.data_directory).await
             .context("Erreur création répertoire de données")?;
 
+        Ok(config)
+    }
+
+    /// Charge la configuration depuis un fichier spécifique
+    pub async fn load_from_file(path: &str) -> Result<Self> {
+        info!("🔧 Chargement de la configuration depuis: {}", path);
+        
+        let config_content = tokio::fs::read_to_string(path).await
+            .context("Erreur lecture fichier de configuration")?;
+        
+        info!("📄 Contenu du fichier de configuration:");
+        info!("{}", config_content);
+        
+        let config: ServerConfig = serde_json::from_str(&config_content)
+            .context("Erreur parsing configuration JSON")?;
+        
+        info!("✅ Configuration parsée avec succès:");
+        info!("   🆔 Node ID: {}", config.node_id);
+        info!("   🌐 Bind address: {}", config.bind_address);
+        info!("   🔌 API port: {}", config.api_port);
+        info!("   🔗 P2P port: {}", config.p2p_port);
+        info!("   💾 Database URL: {}", config.database_url);
+        info!("   📁 Data directory: {}", config.data_directory);
+        
+        // Créer le répertoire de données si nécessaire
+        tokio::fs::create_dir_all(&config.data_directory).await
+            .context("Erreur création répertoire de données")?;
+        
+        info!("📂 Répertoire de données créé: {}", config.data_directory);
+        
         Ok(config)
     }
 

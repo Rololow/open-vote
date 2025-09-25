@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use crypto_lib::{Hash, PublicKey, Signature};
-use crate::{Vote, Law, Account};
+use crate::{Vote, Law, Account, proposal::Proposal, VerifiedAttestation};
 
 /// Types de transactions dans le système e-gouvernement
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +13,17 @@ pub enum TransactionType {
     UpdateLaw(Uuid, Law),
     SubmitVote(Vote),
     UpdateReputation(Uuid, u64),
+    // Propositions citoyennes
+    CreateProposal(Proposal),
+    /// Ajout d'un soutien (like/signature) à une proposition par une clé publique
+    SupportProposal {
+        proposal_id: Uuid,
+        supporter: PublicKey,
+    },
+    /// Vérifier un compte avec une attestation sans PII
+    VerifyAccount(VerifiedAttestation),
+    /// Révoquer une attestation de vérification
+    RevokeVerification { attestation_id: Uuid, reason: Option<String> },
 }
 
 /// Transaction dans la blockchain
@@ -26,6 +37,9 @@ pub struct Transaction {
     pub nonce: u64,
     pub fee: u64,
     pub data_hash: Hash,
+    /// Référence optionnelle à un engagement d'identité (commitment hash hex)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_ref: Option<String>,
 }
 
 impl Transaction {
@@ -49,6 +63,7 @@ impl Transaction {
             nonce,
             fee,
             data_hash,
+            identity_ref: None,
         }
     }
     
@@ -110,5 +125,42 @@ impl Transaction {
         serde_json::to_string(self)
             .map(|s| s.len())
             .unwrap_or(1000) // estimation par défaut
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_tx() -> Transaction {
+        let kp = crypto_lib::KeyPair::generate();
+        let ttype = TransactionType::UpdateReputation(Uuid::new_v4(), 1);
+        let mut tx = Transaction::new(ttype, kp.public_key().clone(), kp.sign(b"temp"), 1, 0);
+        // Re-signer with proper message format
+        let sign_msg = format!(
+            "TRANSACTION:{}:{}:{}",
+            tx.id,
+            tx.timestamp,
+            tx.data_hash.to_hex()
+        );
+        tx.signature = kp.sign(sign_msg.as_bytes());
+        tx
+    }
+
+    #[test]
+    fn serialize_without_identity_ref_omits_field() {
+        let tx = sample_tx();
+        let json = serde_json::to_string(&tx).unwrap();
+        assert!(!json.contains("identity_ref"), "identity_ref should be omitted when None");
+    }
+
+    #[test]
+    fn serialize_with_identity_ref_includes_field() {
+        let mut tx = sample_tx();
+        tx.identity_ref = Some("deadbeef".into());
+        let json = serde_json::to_string(&tx).unwrap();
+        assert!(json.contains("identity_ref"), "identity_ref should be present when Some");
+        let back: Transaction = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.identity_ref.as_deref(), Some("deadbeef"));
     }
 }

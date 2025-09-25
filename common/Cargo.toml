@@ -11,3 +11,30 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 crypto-lib = { path = "../crypto-lib" }
 thiserror = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[features]
+# Feature "identity" active les structures DID / VC expérimentales.
+# Par défaut désactivée pour limiter l'impact sur les builds légers / CI rapide.
+default = []
+identity = ["dep:ssi", "dep:anyhow", "dep:futures"]
+
+[dependencies.ssi]
+version = "0.7"
+optional = true
+
+[dependencies.anyhow]
+version = "1.0"
+optional = true
+
+[dependencies.futures]
+version = "0.3"
+optional = true
+
+[[bench]]
+name = "identity_hash"
+harness = false

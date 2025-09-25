@@ -1,35 +1,15 @@
 [build]
-# Le fichier de sortie
 target = "index.html"
-# Répertoire de distribution
 dist = "dist"
-# Répertoire public pour les assets statiques
-public_url = "/"
-
-[watch]
-# Ignorer les fichiers temporaires
-ignore = [
-    "dist",
-    "target",
-    ".git",
-    "node_modules",
-    "*.tmp",
-    "*.log"
-]
 
 [serve]
-# Port pour le serveur de développement
-port = 3000
-# Adresse d'écoute
-address = "0.0.0.0"
-# Ouvrir automatiquement le navigateur
+address = "127.0.0.1"
+port = 3001
 open = false
-# Proxy pour l'API
-[[serve.proxy]]
-backend = "http://localhost:8080/api/"
-path = "/api"
+
+[watch]
+watch = ["src/"]
+ignore = ["dist/"]
 
 [clean]
-# Nettoyer aussi le répertoire target
-cargo = true
-dist = true
+dist = "dist"

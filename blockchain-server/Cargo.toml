@@ -8,6 +8,10 @@ description = "Serveur blockchain pour le système e-gouvernement"
 name = "blockchain-server"
 path = "src/main.rs"
 
+[lib]
+name = "blockchain_server"
+path = "src/lib.rs"
+
 [dependencies]
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -18,7 +22,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 
 # Modules locaux
-common = { path = "../common" }
+common = { path = "../common", features = ["identity"] }
 crypto-lib = { path = "../crypto-lib" }
 
 # Réseau et API
@@ -39,3 +43,12 @@ reqwest = { version = "0.11", features = ["json"] }
 # Cryptographie
 sha2 = "0.10"
 rand = "0.8"
+hex = "0.4"
+base64 = "0.21"
+bs58 = "0.5"
+
+[features]
+# Pass-through feature to activate identity-related code (DID/VC) from common crate.
+# Enable by default so API identity endpoints are active in tests and typical runs.
+default = ["identity"]
+identity = ["common/identity"]

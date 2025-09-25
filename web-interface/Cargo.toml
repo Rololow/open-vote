@@ -1,32 +1,27 @@
 [package]
-name = "web-interface"
-version.workspace = true
-edition.workspace = true
-description = "Interface web pour le système e-gouvernement"
+name = "blockchain-analyzer-web"
+version = "0.1.0"
+edition = "2021"
 
-[lib]
-crate-type = ["cdylib"]
+[[bin]]
+name = "blockchain-analyzer-web"
+path = "src/main.rs"
 
 [dependencies]
-# Modules locaux
-common = { path = "../common" }
-crypto-lib = { path = "../crypto-lib" }
-
-# Yew et Web
-yew = { workspace = true }
-gloo = { workspace = true }
-wasm-bindgen = { workspace = true }
-web-sys = { workspace = true }
-js-sys = "0.3"
+yew = { version = "0.21", features = ["csr"] }
+wasm-bindgen = "0.2"
+web-sys = "0.3"
+gloo = { version = "0.11", features = ["net", "storage", "timers"] }
 wasm-bindgen-futures = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde", "wasm-bindgen"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+js-sys = "0.3"
+getrandom = { version = "0.2", features = ["js"] }
 
-# Sérialisation
-serde = { workspace = true }
-serde_json = { workspace = true }
+[dependencies.common]
+path = "../common"
 
-# HTTP client pour WASM
-reqwest = { version = "0.11", features = ["json"] }
-
-# Utilitaires
-uuid = { workspace = true }
-chrono = { workspace = true }
+[dependencies.crypto-lib]
+path = "../crypto-lib"

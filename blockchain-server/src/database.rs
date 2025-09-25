@@ -1,6 +1,9 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite, Row};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+use std::path::Path;
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn, error};
 use uuid::Uuid;
@@ -76,9 +79,42 @@ impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
         info!("🗄️ Connexion à la base de données: {}", database_url);
         
+        // Ensure parent directory exists for file-based SQLite URLs
+        if let Some(path_str) = database_url.strip_prefix("sqlite:") {
+            let trimmed = path_str.trim_start_matches('/');
+            if !trimmed.starts_with(':') && !trimmed.starts_with("memory") {
+                let file_path = if path_str.starts_with("//") { &path_str[2..] } else { path_str };
+                let file_path = file_path.split('?').next().unwrap_or(file_path);
+                let file_path = file_path.trim_start_matches('/');
+                let p = Path::new(file_path);
+                if let Some(dir) = p.parent() {
+                    if !dir.as_os_str().is_empty() {
+                        tokio::fs::create_dir_all(dir).await?;
+                    }
+                }
+                if !p.exists() {
+                    use tokio::io::AsyncWriteExt;
+                    if let Some(dir) = p.parent() {
+                        tokio::fs::create_dir_all(dir).await.ok();
+                    }
+                    let mut f = tokio::fs::OpenOptions::new()
+                        .create(true)
+                        .write(true)
+                        .open(p)
+                        .await?;
+                    f.flush().await.ok();
+                }
+            }
+        }
+
+        let opts = SqliteConnectOptions::from_str(database_url)?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Delete)
+            .foreign_keys(true);
+
         let pool = SqlitePoolOptions::new()
             .max_connections(10)
-            .connect(database_url)
+            .connect_with(opts)
             .await?;
 
         let db = Self { pool };
@@ -86,8 +122,7 @@ impl Database {
         // Créer les tables si elles n'existent pas
         db.create_tables().await?;
         
-        // Insérer des données de test si la base est vide
-        db.seed_data().await?;
+    // Pas de données de démonstration – la base démarre vide
         
         info!("✅ Base de données initialisée avec succès");
         Ok(db)
@@ -163,187 +198,7 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Table des transactions
-        sqlx::query(r#"
-            CREATE TABLE IF NOT EXISTS transactions (
-                id TEXT PRIMARY KEY,
-                block_id TEXT,
-                from_address TEXT NOT NULL,
-                to_address TEXT NOT NULL,
-                transaction_type TEXT NOT NULL,
-                data TEXT NOT NULL,
-                signature TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                FOREIGN KEY (block_id) REFERENCES blocks (id)
-            )
-        "#)
-        .execute(&self.pool)
-        .await?;
-
-        info!("✅ Tables créées avec succès");
-        Ok(())
-    }
-
-    /// Insère des données de test
-    async fn seed_data(&self) -> Result<()> {
-        // Vérifier si des données existent déjà
-        let law_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM laws")
-            .fetch_one(&self.pool)
-            .await?;
-
-        if law_count > 0 {
-            info!("📊 Données existantes trouvées, pas de seed nécessaire");
-            return Ok(());
-        }
-
-        info!("🌱 Insertion des données de test...");
-
-        // Insérer des comptes de test
-        let accounts = vec![
-            DbAccount {
-                id: "acc-1".to_string(),
-                public_key: "0x1234567890abcdef".to_string(),
-                display_name: "Marie Dupont".to_string(),
-                reputation: 85,
-                created_at: "2024-01-01T00:00:00Z".to_string(),
-            },
-            DbAccount {
-                id: "acc-2".to_string(),
-                public_key: "0xabcdef1234567890".to_string(),
-                display_name: "Jean Martin".to_string(),
-                reputation: 92,
-                created_at: "2024-01-15T00:00:00Z".to_string(),
-            },
-            DbAccount {
-                id: "acc-3".to_string(),
-                public_key: "0x5678901234abcdef".to_string(),
-                display_name: "Sophie Dubois".to_string(),
-                reputation: 78,
-                created_at: "2024-02-01T00:00:00Z".to_string(),
-            },
-        ];
-
-        for account in &accounts {
-            sqlx::query(r#"
-                INSERT OR IGNORE INTO accounts (id, public_key, display_name, reputation, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            "#)
-            .bind(&account.id)
-            .bind(&account.public_key)
-            .bind(&account.display_name)
-            .bind(account.reputation)
-            .bind(&account.created_at)
-            .execute(&self.pool)
-            .await?;
-        }
-
-        // Insérer des lois de test
-        let laws = vec![
-            DbLaw {
-                id: "law-1".to_string(),
-                title: "Loi sur la Protection des Données Citoyennes".to_string(),
-                content: "Cette loi vise à protéger les données personnelles des citoyens dans l'écosystème numérique gouvernemental. Elle établit des règles strictes pour la collecte, le traitement et le stockage des informations personnelles.".to_string(),
-                summary: "Protection renforcée des données personnelles des citoyens".to_string(),
-                category: "Numérique".to_string(),
-                status: "Active".to_string(),
-                author: "0x1234567890abcdef".to_string(),
-                created_at: "2024-01-15T10:30:00Z".to_string(),
-                votes_for: 156,
-                votes_against: 23,
-                votes_abstain: 12,
-            },
-            DbLaw {
-                id: "law-2".to_string(),
-                title: "Règlement sur la Transparence Budgétaire".to_string(),
-                content: "Établit les règles de transparence pour la publication des budgets publics sur la blockchain. Tous les citoyens auront accès aux détails des dépenses publiques en temps réel.".to_string(),
-                summary: "Transparence obligatoire des budgets publics".to_string(),
-                category: "Finances".to_string(),
-                status: "Voting".to_string(),
-                author: "0xabcdef1234567890".to_string(),
-                created_at: "2024-02-20T14:45:00Z".to_string(),
-                votes_for: 89,
-                votes_against: 45,
-                votes_abstain: 8,
-            },
-            DbLaw {
-                id: "law-3".to_string(),
-                title: "Décret sur la Participation Citoyenne Numérique".to_string(),
-                content: "Définit les modalités de participation des citoyens aux décisions publiques via la plateforme blockchain. Inclut les procédures de vote, de débat et de proposition de nouvelles lois.".to_string(),
-                summary: "Cadre pour la participation citoyenne en ligne".to_string(),
-                category: "Gouvernance".to_string(),
-                status: "InReview".to_string(),
-                author: "0x5678901234abcdef".to_string(),
-                created_at: "2024-03-10T09:15:00Z".to_string(),
-                votes_for: 34,
-                votes_against: 12,
-                votes_abstain: 5,
-            },
-        ];
-
-        for law in &laws {
-            sqlx::query(r#"
-                INSERT OR IGNORE INTO laws (id, title, content, summary, category, status, author, created_at, votes_for, votes_against, votes_abstain)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#)
-            .bind(&law.id)
-            .bind(&law.title)
-            .bind(&law.content)
-            .bind(&law.summary)
-            .bind(&law.category)
-            .bind(&law.status)
-            .bind(&law.author)
-            .bind(&law.created_at)
-            .bind(law.votes_for)
-            .bind(law.votes_against)
-            .bind(law.votes_abstain)
-            .execute(&self.pool)
-            .await?;
-        }
-
-        // Insérer des votes de test
-        let votes = vec![
-            DbVote {
-                id: "vote-1".to_string(),
-                law_id: "law-1".to_string(),
-                voter_id: "acc-1".to_string(),
-                vote_type: "for".to_string(),
-                timestamp: "2024-01-16T10:30:00Z".to_string(),
-                comment: Some("Essentiel pour la protection des citoyens".to_string()),
-            },
-            DbVote {
-                id: "vote-2".to_string(),
-                law_id: "law-1".to_string(),
-                voter_id: "acc-2".to_string(),
-                vote_type: "for".to_string(),
-                timestamp: "2024-01-16T11:15:00Z".to_string(),
-                comment: None,
-            },
-            DbVote {
-                id: "vote-3".to_string(),
-                law_id: "law-2".to_string(),
-                voter_id: "acc-3".to_string(),
-                vote_type: "against".to_string(),
-                timestamp: "2024-02-21T09:00:00Z".to_string(),
-                comment: Some("Mesures trop restrictives".to_string()),
-            },
-        ];
-
-        for vote in &votes {
-            sqlx::query(r#"
-                INSERT OR IGNORE INTO votes (id, law_id, voter_id, vote_type, timestamp, comment)
-                VALUES (?, ?, ?, ?, ?, ?)
-            "#)
-            .bind(&vote.id)
-            .bind(&vote.law_id)
-            .bind(&vote.voter_id)
-            .bind(&vote.vote_type)
-            .bind(&vote.timestamp)
-            .bind(&vote.comment)
-            .execute(&self.pool)
-            .await?;
-        }
-
-        info!("✅ Données de test insérées avec succès");
+        // Pas de données de démonstration – la base démarre vide
         Ok(())
     }
 

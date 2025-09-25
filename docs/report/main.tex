@@ -1,0 +1,163 @@
+% E-Government Blockchain: System Architecture and Components
+\documentclass[12pt,a4paper]{report}
+
+% Encoding and language
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{lmodern}
+
+% Layout and links
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{csquotes}
+\usepackage{caption}
+\usepackage{listings}
+\usepackage[nameinlink]{cleveref}
+
+% Code listings (Rust/JSON)
+\lstdefinelanguage{Rust}{
+  morekeywords={async,await,crate,mod,move,ref,trait,where,Self,self,super,Box,Result,Option,Some,None,Ok,Err,fn,let,mut,struct,enum,impl,for,loop,while,match,if,else,return,use,as,const,static,extern,unsafe,macro_rules!,pub,in},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]",
+}
+\lstdefinelanguage{JSON}{
+  morestring=[b]",
+  literate={-}{{-}}1,
+}
+\lstset{basicstyle=\ttfamily\small,breaklines=true,columns=fullflexible,frame=single,rulecolor=\color{black!20}}
+
+\title{E-Government Blockchain\\System Architecture and Components}
+\author{Project Report}
+\date{\today}
+
+\begin{document}
+\maketitle
+\pagenumbering{roman}
+
+\begin{abstract}
+% discuss about decentralized voting system
+\end{abstract}
+
+\tableofcontents
+\cleardoublepage
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+\section{Purpose and Scope}
+This document provides a comprehensive description of the e-government blockchain platform, including its high-level goals, architecture, and the responsibilities of each major component.
+
+\chapter{System Overview}
+\section{High-Level Architecture}
+% Here the tools used to build the system should not be discussed
+% Only the theoretical architecture should be described
+The platform is structured as a Rust workspace with the following crates and directories:
+\begin{itemize}[noitemsep]
+  \item \textbf{blockchain-server/}: HTTP API, consensus/security stubs, storage layer, identity issuer/verification.
+  \item \textbf{common/}: Shared domain models (transactions, blocks, accounts, laws, votes, proposals) and optional identity module behind the \texttt{identity} feature flag.
+  \item \textbf{crypto-lib/}: Key generation, signatures (Ed25519), hashing (SHA-256), serialization tests.
+  \item \textbf{web-interface/}: Yew single-page app served via Trunk.
+  \item \textbf{wallet-cli/}: Command-line client (scaffold).
+  \item \textbf{migrations/}: SQL scripts applied in increasing order, tracked in \texttt{schema\_migrations}.
+  \item \textbf{tests/}: Integration tests (e.g., migration smoke test, identity commitment idempotence).
+\end{itemize}
+
+\chapter{Components ("Blocks")}
+\section{Common (Domain Model)}
+The \texttt{common} crate defines core domain structures:
+\begin{itemize}[noitemsep]
+  \item \textbf{Transaction}: includes \texttt{id}, \texttt{transaction\_type}, \texttt{sender}, \texttt{timestamp}, \texttt{signature}, \texttt{nonce}, \texttt{fee}, and \texttt{data\_hash}. A \texttt{verify()} method checks integrity and signatures.
+  \item \textbf{Blockchain, Block, Account, Law, Vote, Proposal}: types representing the ledger and governance entities.
+  \item \textbf{Identity (feature-gated)}: DID utilities, canonical JSON and commitment hashing, VC helpers.
+\end{itemize}
+
+\section{Blockchain}
+
+\subsection{API}
+The API is built with Axum. Routes cover general blockchain operations and identity endpoints. The server can be started normally or in migrate-only mode.
+
+\subsection{Identity Issuer and Verifier}
+Issuer derives a \texttt{did:key} from the public key (multicodec 0xED 0x01, base58btc). VC issuance signs the canonicalized unsigned credential (no proof), producing artifacts: canonical JSON, digest, base58 signature, and verificationMethod. The proof uses \texttt{issuanceDate} as \texttt{created} to ensure determinism for identical inputs. Verification reconstructs the digest, recovers the DID key, checks the signature, and ensures the proof's verificationMethod matches the issuer DID.
+
+\subsection{Security Module}
+Security covers:
+\begin{itemize}[noitemsep]
+  \item Signature verification via \texttt{Transaction::verify()}.
+  \item Proof-of-work simulation with configurable difficulty.
+  \item Double-spend detection hardened with per-sender nonces: transactions must use strictly increasing nonces compared to chain history; duplicates within a block are rejected. A fallback heuristic (same sender and \texttt{data\_hash}) protects older clients.
+\end{itemize}
+
+\section{Wallet CLI}
+The CLI provides a scaffold for interactions (to be expanded). Future work includes commands for submitting transactions, querying the chain, and handling identity credentials.
+
+\chapter{Data Model and Schema}
+\section{Core Tables}
+At minimum, the schema includes:
+\begin{itemize}[noitemsep]
+  \item \textbf{blocks}, \textbf{transactions}, \textbf{accounts}, \textbf{laws}, \textbf{votes}
+  \item \textbf{identity\_commitments}: stores canonicalized commitment hashes and signed artifacts; unique \texttt{commitment\_hash} ensures idempotence.
+  \item \textbf{schema\_migrations}: migration bookkeeping.
+\end{itemize}
+
+\section{Identity Commitments}
+Commitment hashes are computed over canonicalized unsigned credential JSON (stable ordering). The storage layer inserts commitments idempotently via a uniqueness constraint.
+
+\chapter{APIs}
+\section{Identity}
+\begin{itemize}[noitemsep]
+  \item \textbf{POST /issuer/issue}: Issues a verifiable credential for a subject DID; returns the signed credential and signing artifacts.
+  \item \textbf{POST /issuer/verify}: Verifies a provided credential by canonicalization, digest check, key recovery (did:key), signature verification, and method coherence.
+\end{itemize}
+\noindent Other blockchain-related routes exist for accounts, laws, votes, and P2P operations (see server sources).
+
+\chapter{Security Considerations}
+\section{Threats and Controls}
+\begin{itemize}[noitemsep]
+  \item \textbf{Double spend:} prevented via per-sender nonces and intra-block duplication checks; heuristic fallback for legacy clients.
+  \item \textbf{Replay:} nonces and \texttt{data\_hash} uniqueness reduce replay viability.
+  \item \textbf{Integrity:} deterministic canonicalization and digesting; Ed25519 signatures.
+  \item \textbf{PoW abuse:} difficulty parameter validated during block mining.
+\end{itemize}
+
+\chapter{Build, Run, and Tooling}
+Workspace tasks provide repeatable commands (build, test, run services). The server supports \texttt{--migrate} to apply DB migrations without starting network services. The web interface uses Trunk for development and hot reload.
+
+\chapter{Testing}
+Unit tests cover cryptographic primitives, identity hashing, and server-side security behaviors. Integration tests assert migration correctness and storage idempotence. The full test suite passes at the time of writing (warnings remain to be cleaned up).
+
+\chapter{Future Work}
+\begin{itemize}[noitemsep]
+  \item Persist and reload issuer keypairs securely to stabilize DID across restarts.
+  \item Expand negative-path identity tests (tampering, expiry, verification method mismatches).
+  \item Replace heuristic double-spend fallback with explicit inputs (UTXO) or stricter account-state checks.
+  \item Add diagrams (architecture, sequence charts) and a thorough API reference.
+  \item Performance benchmarks and capacity planning (block times, throughput).
+  \item Deployment guidelines (containerization, CI/CD) and operational runbooks.
+\end{itemize}
+
+\appendix
+\chapter{Repository Layout (Excerpt)}
+\begin{verbatim}
+blockchain-server/
+  src/ (API, issuer, security, storage, consensus, network)
+common/ (domain models; optional identity feature)
+crypto-lib/ (keys, signatures, hashing)
+web-interface/ (Yew + Trunk)
+wallet-cli/
+migrations/ (0000_init.sql, 0001_identity_commitments.sql)
+tests/ (integration tests)
+\end{verbatim}
+
+% \bibliographystyle{plain}
+% \bibliography{references}
+
+\end{document}

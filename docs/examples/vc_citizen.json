@@ -1,0 +1,16 @@
+{
+  "@context": ["https://www.w3.org/2018/credentials/v1"],
+  "type": ["VerifiableCredential", "CitizenCredential"],
+  "issuer": "did:key:zISSUER",
+  "issuanceDate": "2025-09-24T12:00:00Z",
+  "expirationDate": "2026-09-24T12:00:00Z",
+  "credentialSubject": {
+    "id": "did:key:zSUBJECT",
+    "country": "FR",
+    "over18": true
+  },
+  "metadata": {
+    "roles": ["citizen"],
+    "version": 1
+  }
+}

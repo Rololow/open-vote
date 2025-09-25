@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use std::fmt;
 use crypto_lib::{Hash, PublicKey};
+use crate::law_category::LawCategory;
 
 /// Types de modifications sur les lois
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +25,22 @@ pub enum LawStatus {
     Active,        // Active (en vigueur)
     Suspended,     // Suspendue
     Repealed,      // Abrogée
+}
+
+impl fmt::Display for LawStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            LawStatus::Draft => "Draft",
+            LawStatus::InReview => "InReview",
+            LawStatus::Voting => "Voting",
+            LawStatus::Approved => "Approved",
+            LawStatus::Rejected => "Rejected",
+            LawStatus::Active => "Active",
+            LawStatus::Suspended => "Suspended",
+            LawStatus::Repealed => "Repealed",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 /// Une loi dans le système
@@ -157,5 +175,10 @@ impl Law {
     pub fn verify_content_integrity(&self) -> bool {
         let calculated_hash = Hash::new(self.content.as_bytes());
         calculated_hash == self.content_hash
+    }
+
+    /// Retourne la catégorie sous forme d'énum pour un usage type-safe côté UI
+    pub fn category_enum(&self) -> LawCategory {
+        LawCategory::from_str(&self.category)
     }
 }

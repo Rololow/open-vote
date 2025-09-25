@@ -1,7 +1,11 @@
 use anyhow::{Result, Context};
 use sqlx::{SqlitePool, Row};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+use std::path::Path;
+use std::str::FromStr;
 use tracing::{info, error};
 use serde_json;
+use std::ffi::OsStr;
 
 use common::{Blockchain, Block, Transaction, Account, Law, Vote};
 
@@ -13,125 +17,160 @@ pub struct Storage {
 impl Storage {
     /// Crée une nouvelle instance de stockage
     pub async fn new(database_url: &str) -> Result<Self> {
-        info!("Connexion à la base de données: {}", database_url);
-        
-        let pool = SqlitePool::connect(database_url).await
+        info!("🗄️ Initialisation du stockage SQLite");
+        info!("   📍 URL de la base de données: {}", database_url);
+
+        // Ensure parent directory exists for file-based SQLite URLs
+    if let Some(path_str) = database_url.strip_prefix("sqlite:") {
+            info!("   📁 Chemin extrait: {}", path_str);
+            // Accept both sqlite:./file and sqlite://./file forms
+            let trimmed = path_str.trim_start_matches('/');
+            // If it looks like a file path (starts with ./ or .\\ or lacks '?mode=memory')
+            if !trimmed.starts_with(':') && !trimmed.starts_with("memory") {
+                // Extract directory component and create it
+                let file_path = if path_str.starts_with("//") {
+                    // sqlite://./path -> strip the leading //
+                    &path_str[2..]
+                } else {
+                    path_str
+                };
+                // Remove any query parameters
+                let file_path = file_path.split('?').next().unwrap_or(file_path);
+                // Normalize leading slashes introduced by //
+                let file_path = file_path.trim_start_matches('/');
+                let p = Path::new(file_path);
+                if let Some(dir) = p.parent() {
+                    if !dir.as_os_str().is_empty() {
+                        tokio::fs::create_dir_all(dir).await
+                            .with_context(|| format!("Erreur création répertoire de données: {}", dir.display()))?;
+                    }
+                }
+
+                // Pre-create the database file to avoid SQLITE_CANTOPEN (code 14)
+                if !p.exists() {
+                    use tokio::io::AsyncWriteExt;
+                    if let Some(dir) = p.parent() {
+                        tokio::fs::create_dir_all(dir).await.ok();
+                    }
+                    let mut f = tokio::fs::OpenOptions::new()
+                        .create(true)
+                        .write(true)
+                        .open(p)
+                        .await
+                        .with_context(|| format!("Impossible de créer le fichier de base de données: {}", p.display()))?;
+                    // Ensure the file exists; no content needed
+                    f.flush().await.ok();
+                }
+            }
+        }
+
+        // Build connect options with create_if_missing to avoid open errors
+        let options = SqliteConnectOptions::from_str(database_url)
+            .context("Options de connexion SQLite invalides")?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Delete)
+            .foreign_keys(true);
+
+        info!("🔗 Connexion à la base de données SQLite...");
+        let pool = SqlitePool::connect_with(options).await
             .context("Erreur connexion base de données")?;
+        info!("✅ Connexion établie avec succès");
 
         let storage = Self { pool };
         
         // Initialiser les tables
+        info!("🏗️ Initialisation des tables...");
         storage.init_tables().await?;
+        info!("✅ Tables initialisées avec succès");
         
         Ok(storage)
     }
 
     /// Initialise les tables de la base de données
     async fn init_tables(&self) -> Result<()> {
-        info!("Initialisation des tables de la base de données");
+        info!("Initialisation des tables via migrations SQL");
+        // Exécuter les migrations (migrations/*.sql), y compris 0000_init.sql et 0001_identity_commitments.sql
+        self.run_migrations().await?;
+        info!("Tables initialisées avec succès (migrations appliquées)");
+        Ok(())
+    }
 
-        // Table des blocs
+    /// Exécute les migrations SQL présentes dans le dossier migrations/ (ou MIGRATIONS_DIR)
+    async fn run_migrations(&self) -> Result<()> {
+        use tokio::fs;
+        let dir = std::env::var("MIGRATIONS_DIR").unwrap_or_else(|_| "./migrations".to_string());
+        let path = Path::new(&dir);
+        if !path.exists() {
+            info!("Aucun dossier de migrations trouvé: {} (skip)", dir);
+            return Ok(());
+        }
+
+        // Table de suivi des migrations
         sqlx::query(r#"
-            CREATE TABLE IF NOT EXISTS blocks (
+            CREATE TABLE IF NOT EXISTS schema_migrations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                block_number INTEGER NOT NULL UNIQUE,
-                hash TEXT NOT NULL UNIQUE,
-                previous_hash TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                block_data TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                filename TEXT NOT NULL UNIQUE,
+                applied_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
             )
         "#)
         .execute(&self.pool)
-        .await
-        .context("Erreur création table blocks")?;
+        .await?;
 
-        // Table des transactions
-        sqlx::query(r#"
-            CREATE TABLE IF NOT EXISTS transactions (
-                id TEXT PRIMARY KEY,
-                block_number INTEGER,
-                transaction_type TEXT NOT NULL,
-                sender TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                signature TEXT NOT NULL,
-                transaction_data TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (block_number) REFERENCES blocks (block_number)
-            )
-        "#)
-        .execute(&self.pool)
-        .await
-        .context("Erreur création table transactions")?;
+        // Récupérer liste des migrations déjà appliquées
+        let applied_rows = sqlx::query("SELECT filename FROM schema_migrations")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut applied = std::collections::HashSet::new();
+        for row in applied_rows { let f: String = row.get("filename"); applied.insert(f); }
 
-        // Table des comptes
-        sqlx::query(r#"
-            CREATE TABLE IF NOT EXISTS accounts (
-                id TEXT PRIMARY KEY,
-                public_key TEXT NOT NULL UNIQUE,
-                reputation INTEGER NOT NULL DEFAULT 0,
-                is_active BOOLEAN NOT NULL DEFAULT 1,
-                metadata TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        "#)
-        .execute(&self.pool)
-        .await
-        .context("Erreur création table accounts")?;
+        // Lister les fichiers .sql et trier
+        let mut entries = fs::read_dir(path).await
+            .with_context(|| format!("Lecture du dossier migrations: {}", dir))?;
+        let mut files: Vec<String> = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            let file_type = entry.file_type().await?;
+            if file_type.is_file() {
+                let name = entry.file_name();
+                if Path::new(&name).extension() == Some(OsStr::new("sql")) {
+                    files.push(name.to_string_lossy().to_string());
+                }
+            }
+        }
+        files.sort();
 
-        // Table des lois
-        sqlx::query(r#"
-            CREATE TABLE IF NOT EXISTS laws (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                summary TEXT NOT NULL,
-                category TEXT NOT NULL,
-                status TEXT NOT NULL,
-                author TEXT NOT NULL,
-                version INTEGER NOT NULL DEFAULT 1,
-                parent_law_id TEXT,
-                content_hash TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        "#)
-        .execute(&self.pool)
-        .await
-        .context("Erreur création table laws")?;
+        // Appliquer chaque migration non encore appliquée
+        for fname in files {
+            if applied.contains(&fname) { continue; }
+            let full = path.join(&fname);
+            let sql = fs::read_to_string(&full).await
+                .with_context(|| format!("Lecture migration {}", full.display()))?;
+            self.apply_sql_script(&sql).await
+                .with_context(|| format!("Application migration {}", fname))?;
+            sqlx::query("INSERT INTO schema_migrations (filename) VALUES (?)")
+                .bind(&fname)
+                .execute(&self.pool)
+                .await?;
+            info!("✅ Migration appliquée: {}", fname);
+        }
+        Ok(())
+    }
 
-        // Table des votes
-        sqlx::query(r#"
-            CREATE TABLE IF NOT EXISTS votes (
-                id TEXT PRIMARY KEY,
-                law_id TEXT NOT NULL,
-                voter TEXT NOT NULL,
-                vote_type TEXT NOT NULL,
-                weight REAL NOT NULL,
-                timestamp TEXT NOT NULL,
-                signature TEXT NOT NULL,
-                comment TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (law_id) REFERENCES laws (id),
-                UNIQUE(law_id, voter)
-            )
-        "#)
-        .execute(&self.pool)
-        .await
-        .context("Erreur création table votes")?;
-
-        // Index pour les performances
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_blocks_number ON blocks (block_number)")
-            .execute(&self.pool).await?;
-        
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_transactions_block ON transactions (block_number)")
-            .execute(&self.pool).await?;
-        
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_votes_law ON votes (law_id)")
-            .execute(&self.pool).await?;
-
-        info!("Tables initialisées avec succès");
+    /// Applique un script SQL multi-statements en le scindant sur ';' (simple, suffisant pour SQLite sans triggers)
+    async fn apply_sql_script(&self, script: &str) -> Result<()> {
+        // Retirer commentaires '-- ...' et lignes vides, puis splitter
+        let mut current = String::new();
+        for line in script.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() { continue; }
+            if trimmed.starts_with("--") { continue; }
+            current.push_str(line);
+            current.push('\n');
+        }
+        for stmt in current.split(';') {
+            let s = stmt.trim();
+            if s.is_empty() { continue; }
+            sqlx::query(s).execute(&self.pool).await?;
+        }
         Ok(())
     }
 
@@ -196,6 +235,11 @@ impl Storage {
                 .context("Erreur désérialisation bloc")?;
             blockchain.blocks.push(block);
         }
+
+        // Rejouer les transactions pour reconstruire l'état (comptes, lois, votes, propositions, supporters)
+        blockchain
+            .rebuild_state_from_blocks()
+            .context("Erreur lors de la reconstruction de l'état de la blockchain")?;
 
         // Charger les comptes
         let rows = sqlx::query("SELECT id, public_key, reputation, is_active, metadata FROM accounts")
@@ -294,5 +338,75 @@ impl Storage {
         .await?;
 
         Ok(())
+    }
+
+    /// Insère un engagement d'identité (commitment) de façon idempotente.
+    /// Retourne (id, existed) où `existed=true` signifie que le hash était déjà présent.
+    pub async fn insert_identity_commitment(
+        &self,
+        public_key: &str,
+        did: &str,
+        commitment_hash: &str,
+        issuer_did: &str,
+        issued_at: &str,
+        expires_at: Option<&str>,
+    ) -> Result<(i64, bool)> {
+        let mut tx = self.pool.begin().await?;
+        let insert_res = sqlx::query(r#"
+            INSERT INTO identity_commitments (public_key, did, commitment_hash, issuer_did, issued_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        "#)
+            .bind(public_key)
+            .bind(did)
+            .bind(commitment_hash)
+            .bind(issuer_did)
+            .bind(issued_at)
+            .bind(expires_at)
+            .execute(&mut *tx).await;
+
+        match insert_res {
+            Ok(res) => {
+                tx.commit().await?;
+                let id = res.last_insert_rowid();
+                Ok((id, false))
+            }
+            Err(e) => {
+                // Conflit unicité: récupérer l'existant
+                if let sqlx::Error::Database(db_err) = &e {
+                    let msg = db_err.message();
+                    if msg.contains("UNIQUE") && msg.contains("commitment_hash") {
+                        let row = sqlx::query("SELECT id FROM identity_commitments WHERE commitment_hash = ?")
+                            .bind(commitment_hash)
+                            .fetch_one(&self.pool).await?;
+                        let id: i64 = row.get("id");
+                        return Ok((id, true));
+                    }
+                }
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Récupère un enregistrement identity_commitments par hash (lecture publique)
+    pub async fn get_identity_commitment_by_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<(String, String, Option<String>, Option<String>, String)>> {
+        let row = sqlx::query(
+            r#"SELECT did, issuer_did, issued_at, expires_at, status FROM identity_commitments WHERE commitment_hash = ?"#
+        )
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some(r) = row {
+            let did: String = r.get("did");
+            let issuer_did: String = r.get("issuer_did");
+            let issued_at: Option<String> = r.try_get("issued_at").ok();
+            let expires_at: Option<String> = r.try_get("expires_at").ok();
+            let status: String = r.get("status");
+            Ok(Some((did, issuer_did, issued_at, expires_at, status)))
+        } else {
+            Ok(None)
+        }
     }
 }

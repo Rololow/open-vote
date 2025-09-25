@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn, error};
+use common::{Transaction as CoreTransaction, TransactionType};
+use crypto_lib::{KeyPair, Hash};
+use uuid::Uuid;
+use chrono::Utc;
 
 /// Module de sécurité avancé pour la blockchain
 /// Implémente les mécanismes de protection essentiels
@@ -38,19 +42,8 @@ pub struct Block {
     pub merkle_root: String,
     pub nonce: u64,
     pub difficulty: u32,
-    pub transactions: Vec<Transaction>,
+    pub transactions: Vec<CoreTransaction>,
     pub hash: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Transaction {
-    pub id: String,
-    pub from: String,
-    pub to: String,
-    pub data: String,
-    pub timestamp: u64,
-    pub signature: String,
-    pub public_key: String,
 }
 
 #[derive(Debug, Clone)]
@@ -69,30 +62,22 @@ impl SecurityManager {
 
     /// 1. VALIDATION CRYPTOGRAPHIQUE
     /// Vérifie la signature d'une transaction
-    pub fn verify_transaction_signature(&self, transaction: &Transaction) -> Result<bool> {
-        // Dans un vrai système, on utiliserait Ed25519 ou ECDSA
-        let message = format!("{}{}{}{}", 
-            transaction.from, 
-            transaction.to, 
-            transaction.data, 
-            transaction.timestamp
-        );
-        
-        // Simulation de vérification de signature
-        let expected_signature = self.calculate_signature(&message, &transaction.public_key);
-        
-        if transaction.signature == expected_signature {
-            info!("✅ Signature valide pour transaction {}", transaction.id);
-            Ok(true)
-        } else {
-            warn!("❌ Signature invalide pour transaction {}", transaction.id);
-            Ok(false)
+    pub fn verify_transaction_signature(&self, transaction: &CoreTransaction) -> Result<bool> {
+        match transaction.verify() {
+            Ok(()) => {
+                info!("✅ Signature valide pour transaction {}", transaction.id);
+                Ok(true)
+            },
+            Err(e) => {
+                warn!("❌ Signature invalide pour transaction {}: {}", transaction.id, e);
+                Ok(false)
+            }
         }
     }
 
     /// 2. PROOF OF WORK
     /// Implémente le mécanisme de minage sécurisé
-    pub fn mine_block(&self, transactions: Vec<Transaction>, previous_hash: String) -> Result<Block> {
+    pub fn mine_block(&self, transactions: Vec<CoreTransaction>, previous_hash: String) -> Result<Block> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)?
             .as_secs();
@@ -257,7 +242,7 @@ impl SecurityManager {
         format!("{:x}", hasher.finalize())
     }
 
-    fn calculate_merkle_root(&self, transactions: &[Transaction]) -> String {
+    fn calculate_merkle_root(&self, transactions: &[CoreTransaction]) -> String {
         if transactions.is_empty() {
             return "0".repeat(64);
         }
@@ -299,17 +284,37 @@ impl SecurityManager {
         hash.starts_with(&"0".repeat(difficulty as usize))
     }
 
-    fn detect_double_spending(&self, transactions: &[Transaction]) -> bool {
-        // Vérifier les doubles dépenses dans le même bloc
-        let mut seen_inputs = std::collections::HashSet::new();
-        
-        for tx in transactions {
-            let input_key = format!("{}:{}", tx.from, tx.id);
-            if !seen_inputs.insert(input_key) {
-                return true; // Double dépense détectée
+    fn detect_double_spending(&self, transactions: &[CoreTransaction]) -> bool {
+        use std::collections::{HashMap, HashSet};
+
+        // Règle 1: Nonce strictement croissant par expéditeur (contre l'historique)
+        let mut last_nonce_on_chain: HashMap<String, u64> = HashMap::new();
+        for block in &self.blockchain {
+            for tx in &block.transactions {
+                let sender = tx.sender.to_hex();
+                let e = last_nonce_on_chain.entry(sender).or_insert(0);
+                if tx.nonce > *e { *e = tx.nonce; }
             }
         }
-        
+
+        // Règle 2: Dans le bloc, pas de nonce dupliqué pour un même expéditeur
+        let mut seen_nonces: HashMap<String, HashSet<u64>> = HashMap::new();
+        for tx in transactions {
+            let sender = tx.sender.to_hex();
+            if let Some(last) = last_nonce_on_chain.get(&sender) {
+                if tx.nonce <= *last { return true; }
+            }
+            let entry = seen_nonces.entry(sender).or_default();
+            if !entry.insert(tx.nonce) { return true; }
+        }
+
+        // Règle 3 (fallback): même expéditeur + même data_hash
+        let mut seen_value: HashSet<(String, String)> = HashSet::new();
+        for tx in transactions {
+            let key = (tx.sender.to_hex(), tx.data_hash.to_hex());
+            if !seen_value.insert(key) { return true; }
+        }
+
         false
     }
 
@@ -339,12 +344,12 @@ impl SecurityManager {
         block.difficulty < self.config.min_difficulty
     }
 
-    fn detect_spam_attack(&self, transactions: &[Transaction]) -> bool {
+    fn detect_spam_attack(&self, transactions: &[CoreTransaction]) -> bool {
         // Trop de transactions du même expéditeur
         let mut sender_counts = std::collections::HashMap::new();
         
         for tx in transactions {
-            *sender_counts.entry(tx.from.clone()).or_insert(0) += 1;
+            *sender_counts.entry(tx.sender.to_hex()).or_insert(0) += 1;
         }
         
         // Plus de 10 transactions du même expéditeur = suspect
@@ -356,38 +361,42 @@ impl SecurityManager {
 pub mod security_tests {
     use super::*;
 
-    pub fn create_test_transaction(from: &str, to: &str, data: &str) -> Transaction {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        
-        let id = uuid::Uuid::new_v4().to_string();
-        let public_key = format!("pub_key_{}", from);
-        
-        // Simuler la signature
-        let message = format!("{}{}{}{}", from, to, data, timestamp);
-        let mut hasher = Sha256::new();
-        hasher.update(format!("{}{}", message, public_key));
-        let signature = format!("{:x}", hasher.finalize());
+    /// Construit une transaction réelle (common::Transaction) avec signature valide.
+    pub fn create_real_transaction(kp: &KeyPair, tx_type: TransactionType, nonce: u64, fee: u64) -> CoreTransaction {
+        let sender = kp.public_key().clone();
+        let id = Uuid::new_v4();
+        let timestamp = Utc::now();
+        let serialized = serde_json::to_string(&tx_type).unwrap_or_else(|_| "invalid_transaction".to_string());
+        let data_hash = Hash::new(serialized.as_bytes());
+        let message = format!("TRANSACTION:{}:{}:{}", id, timestamp, data_hash.to_hex());
+        let signature = kp.sign(message.as_bytes());
 
-        Transaction {
+        CoreTransaction {
             id,
-            from: from.to_string(),
-            to: to.to_string(),
-            data: data.to_string(),
+            transaction_type: tx_type,
+            sender,
             timestamp,
             signature,
-            public_key,
+            nonce,
+            fee,
+            data_hash,
+            identity_ref: None,
         }
     }
 
-    pub fn simulate_network_attack() -> Vec<Transaction> {
-        // Simuler une attaque de double dépense
-        vec![
-            create_test_transaction("alice", "bob", "100"),
-            create_test_transaction("alice", "charlie", "100"), // Double dépense !
-        ]
+    pub fn create_test_transaction(_from: &str, _to: &str, _data: &str) -> CoreTransaction {
+        let kp = KeyPair::generate();
+        let target = Uuid::new_v4();
+        create_real_transaction(&kp, TransactionType::UpdateReputation(target, 1), 0, 0)
+    }
+
+    pub fn simulate_network_attack() -> Vec<CoreTransaction> {
+        // Simuler une attaque: même expéditeur rejoue exactement la même "valeur" (même data_hash)
+        let kp = KeyPair::generate();
+        let target = Uuid::new_v4();
+        let tx1 = create_real_transaction(&kp, TransactionType::UpdateReputation(target, 100), 1, 0);
+        let tx2 = create_real_transaction(&kp, TransactionType::UpdateReputation(target, 100), 2, 0);
+        vec![tx1, tx2]
     }
 }
 
@@ -414,6 +423,20 @@ mod tests {
     }
 
     #[test]
+    fn test_double_spending_duplicate_nonce() {
+        let config = SecurityConfig::default();
+        let security = SecurityManager::new(config);
+
+        let kp = KeyPair::generate();
+        let target1 = Uuid::new_v4();
+        let t1 = security_tests::create_real_transaction(&kp, TransactionType::UpdateReputation(target1, 7), 42, 0);
+        let target2 = Uuid::new_v4();
+        let t2 = security_tests::create_real_transaction(&kp, TransactionType::UpdateReputation(target2, 3), 42, 0);
+        let txs = vec![t1, t2];
+        assert!(security.detect_double_spending(&txs));
+    }
+
+    #[test]
     fn test_mining() {
         let config = SecurityConfig {
             min_difficulty: 2, // Plus facile pour les tests
@@ -421,9 +444,7 @@ mod tests {
         };
         let security = SecurityManager::new(config);
         
-        let transactions = vec![
-            security_tests::create_test_transaction("alice", "bob", "test mining")
-        ];
+        let transactions = vec![security_tests::create_test_transaction("alice", "bob", "test mining")];
         
         let block = security.mine_block(transactions, "0".repeat(64)).unwrap();
         assert!(block.hash.starts_with("00")); // Vérifie la difficulté
