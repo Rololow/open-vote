@@ -20,6 +20,7 @@ pub struct ServerConfig {
     pub enable_mining: bool,
     pub log_level: String,
     /// Liste des DID émetteurs autorisés (did:key:...), séparés par des virgules
+    #[serde(default)]
     pub allowed_issuers_dids: Vec<String>,
 }
 

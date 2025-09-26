@@ -1,0 +1,27 @@
+système de coffre fort.
+
+
+pleins de coffres qui possèdent une partie du lien identité / anonyme 
+
+
+ex : chacun possède un bout de papier avec une lettre de mon nom.
+
+coffre fort 1 : [R] => 1ere lettre du nom de l'anonyme x
+coffre fort 2 : [o] => 2eme lettre du nom de l'anonyme x
+coffre fort 3 : [b]
+...
+
+et peut vérifier que le hash de la partie correspondante du nom soit valide 
+
+ex :
+hashs de l'anonyme : [exNa, T6RA, ...]
+
+coffre fort 1 vérifie que : 
+hash ([R]) = exNa
+
+coffre fort 2 vérifie que : 
+hash([o]) = T6RA
+
+etc...
+
+ensuite consenscius d'accord entre tout les coffres forts

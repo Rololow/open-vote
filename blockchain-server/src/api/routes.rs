@@ -5,6 +5,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use std::sync::Arc;
 use crate::node::BlockchainNode;
+use chrono::{DateTime, Utc};
 
 /// Create API routes (blockchain operations, accounts, etc.)
 pub fn create_api_routes() -> Router<super::AppState> {
@@ -165,6 +166,25 @@ async fn post_identity_commit(
         return Err((StatusCode::BAD_REQUEST, format!("signature invalide: {e}")));
     }
 
+    // 5.5) Validate dates: issuanceDate present, expirationDate optional but if present must be >= now
+    let issued_at_str = req.credential.get("issuanceDate").and_then(|v| v.as_str()).ok_or((StatusCode::BAD_REQUEST, "issuanceDate manquante".into()))?;
+    let issued_at_dt: DateTime<chrono::FixedOffset> = DateTime::parse_from_rfc3339(issued_at_str)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("issuanceDate invalide: {e}")))?;
+    let now_utc = Utc::now();
+    if issued_at_dt.with_timezone(&Utc) > now_utc + chrono::Duration::minutes(5) { // tolérance légère
+        return Err((StatusCode::BAD_REQUEST, "credential not yet valid (issuanceDate in future)".into()));
+    }
+    if let Some(exp_str) = req.credential.get("expirationDate").and_then(|v| v.as_str()) {
+        let exp_dt: DateTime<chrono::FixedOffset> = DateTime::parse_from_rfc3339(exp_str)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("expirationDate invalide: {e}")))?;
+        if exp_dt.with_timezone(&Utc) < now_utc {
+            return Err((StatusCode::BAD_REQUEST, "credential expired".into()));
+        }
+        if exp_dt <= issued_at_dt {
+            return Err((StatusCode::BAD_REQUEST, "expirationDate doit être > issuanceDate".into()));
+        }
+    }
+
     // 6) Compute commitment hash and extract dates
     let commitment_hash: String = {
         #[cfg(feature = "identity")]
@@ -179,7 +199,7 @@ async fn post_identity_commit(
             String::new()
         }
     };
-    let issued_at = req.credential.get("issuanceDate").and_then(|v| v.as_str()).ok_or((StatusCode::BAD_REQUEST, "issuanceDate manquante".into()))?.to_string();
+    let issued_at = issued_at_str.to_string();
     let expires_at = req.credential.get("expirationDate").and_then(|v| v.as_str()).map(|s| s.to_string());
 
     // 7) Derive subject public key from its did:key (store as public_key)
@@ -199,6 +219,11 @@ async fn post_identity_commit(
         &issued_at,
         expires_at.as_deref(),
     ).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("db insert: {e}")))?;
+
+    // If this is a new commitment, add it to in-memory set and append to log for Phase 3
+    if !existed {
+        node.add_active_commitment(&commitment_hash).await;
+    }
 
     Ok(Json(CommitResponse { commitment_hash, did: subject_did, issuer_did, id, existed }))
 }

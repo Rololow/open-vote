@@ -4,6 +4,7 @@ use tracing::{info, error};
 use super::super::{AppState, types::*};
 use uuid::Uuid;
 use chrono::Utc;
+use common::{Transaction, TransactionType, proposal::Proposal};
 
 /// Handler pour obtenir les blocs
 pub async fn get_blocks_handler(
@@ -98,15 +99,48 @@ pub async fn submit_transaction_handler(
     State(node): State<AppState>,
     Json(request): Json<SubmitTransactionRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
-    // TODO: Implement transaction creation and validation
-    // For now, return a placeholder
-    
-    info!("Transaction received: {}", request.transaction_type);
-    
+    // Minimal demo: only supports creating a dummy Proposal when transaction_type == "create_proposal"
+    if request.transaction_type != "create_proposal" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "unsupported".into(), message: "Only transaction_type=create_proposal is supported on this endpoint; use /rpc/broadcast_transaction for raw signed transactions".into() })
+        ));
+    }
+
+    // Build a simple unsigned transaction using a temporary in-memory key pair for demo purposes
+    // In a real app, client should sign and send via /rpc/broadcast_transaction
+    let kp = crypto_lib::KeyPair::generate();
+    let proposal = Proposal {
+        id: Uuid::new_v4(),
+        title: request.from_account.clone().unwrap_or_else(|| "Proposition".into()),
+        category: "Autre".into(),
+        description: request.to_account.clone().unwrap_or_else(|| "Proposition via /api/transactions".into()),
+        full_text: "".into(),
+        estimated_budget: None,
+        implementation_timeline: None,
+        tags: vec![],
+        author_id: Some(kp.public_key().to_hex()),
+        author_name: Some("api/transactions".into()),
+        created_at: Utc::now(),
+        status: common::proposal::ProposalStatus::CollectingSignatures,
+        supporters_count: 0,
+        expires_at: Utc::now() + chrono::Duration::days(30),
+    };
+    let mut tx = Transaction::new(TransactionType::CreateProposal(proposal), kp.public_key().clone(), kp.sign(b"temp"), 0, 0);
+    let msg = format!("TRANSACTION:{}:{}:{}", tx.id, tx.timestamp, tx.data_hash.to_hex());
+    tx.signature = kp.sign(msg.as_bytes());
+    // Allow passing identity_ref through 'amount' field as a hacky demo: when amount is provided, interpret it as hash length (ignored). Prefer /rpc.
+    if let Some(_amt) = request.amount { /* ignored */ }
+
+    // No identity_ref support through this simple endpoint; prefer /rpc for that feature
+    if let Err(e) = tx.verify() { return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "invalid_tx".into(), message: e })))}
+    if let Err(e) = node.submit_transaction(tx.clone()).await {
+        return Err((StatusCode::BAD_REQUEST, Json(ErrorResponse { error: "submit_failed".into(), message: format!("{}", e) })));
+    }
     Ok(Json(serde_json::json!({
         "status": "pending",
         "message": "Transaction added to mempool",
-        "transaction_id": uuid::Uuid::new_v4().to_string()
+        "transaction_id": tx.id.to_string()
     })))
 }
 

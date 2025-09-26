@@ -14,6 +14,8 @@ use blockchain_server::config::ServerConfig;
 use blockchain_server::node::BlockchainNode;
 use common::{canonical_json_str, compute_credential_hash, hash_hex};
 use crypto_lib::KeyPair;
+use sha2::Digest;
+use common::{Transaction, TransactionType, Account};
 
 // Helper: ensure MIGRATIONS_DIR points to the workspace migrations folder
 fn ensure_migrations_env() {
@@ -208,4 +210,153 @@ async fn post_identity_commit_rejects_disallowed_issuer() {
         .send().await
         .expect("http");
     assert_eq!(resp.status(), reqwest::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn post_identity_commit_rejects_invalid_signature() {
+    let issuer_kp = KeyPair::generate();
+    let subject_kp = KeyPair::generate();
+    let issuer_did = did_key_from_pubkey(issuer_kp.public_key());
+    let subject_did = did_key_from_pubkey(subject_kp.public_key());
+
+    let (base, _handle) = start_test_server(vec![issuer_did.clone()], &uuid::Uuid::new_v4().to_string()).await;
+
+    // Build VC then tamper proofValue to break signature
+    let mut vc = build_signed_vc(&issuer_kp, &issuer_did, &subject_did);
+    if let Some(p) = vc.get_mut("proof") { if let Some(obj) = p.as_object_mut() { if let Some(v) = obj.get_mut("proofValue") { *v = serde_json::Value::String(format!("{}A", v.as_str().unwrap_or(""))); } } }
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/identity/commit", base);
+    let resp = client.post(&url)
+        .json(&serde_json::json!({"credential": vc}))
+        .send().await
+        .expect("http");
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn post_identity_commit_rejects_digest_mismatch() {
+    let issuer_kp = KeyPair::generate();
+    let subject_kp = KeyPair::generate();
+    let issuer_did = did_key_from_pubkey(issuer_kp.public_key());
+    let subject_did = did_key_from_pubkey(subject_kp.public_key());
+
+    let (base, _handle) = start_test_server(vec![issuer_did.clone()], &uuid::Uuid::new_v4().to_string()).await;
+
+    // Build VC then corrupt digest to mismatch canonical hash
+    let mut vc = build_signed_vc(&issuer_kp, &issuer_did, &subject_did);
+    if let Some(p) = vc.get_mut("proof") { if let Some(obj) = p.as_object_mut() { obj.insert("digest".into(), serde_json::json!("deadbeef")); } }
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/identity/commit", base);
+    let resp = client.post(&url)
+        .json(&serde_json::json!({"credential": vc}))
+        .send().await
+        .expect("http");
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn post_identity_commit_rejects_expired_vc() {
+    let issuer_kp = KeyPair::generate();
+    let subject_kp = KeyPair::generate();
+    let issuer_did = did_key_from_pubkey(issuer_kp.public_key());
+    let subject_did = did_key_from_pubkey(subject_kp.public_key());
+
+    let (base, _handle) = start_test_server(vec![issuer_did.clone()], &uuid::Uuid::new_v4().to_string()).await;
+
+    // Build VC then set expirationDate in the past
+    let mut vc = build_signed_vc(&issuer_kp, &issuer_did, &subject_did);
+    if let Some(obj) = vc.as_object_mut() {
+        obj.insert("expirationDate".into(), serde_json::json!((Utc::now() - chrono::Duration::days(1)).to_rfc3339()));
+    }
+    // Recompute signature since canonical changed (we want expired but otherwise valid signature)
+    let mut unsigned = vc.clone();
+    if let Some(o) = unsigned.as_object_mut() { o.remove("proof"); }
+    let raw = serde_json::to_string(&unsigned).unwrap();
+    let canonical = canonical_json_str(&raw).unwrap();
+    let sig = issuer_kp.sign(canonical.as_bytes());
+    let proof_value = format!("z{}", bs58::encode(sig.to_bytes()).into_string());
+    let verification_method = format!("{}#controller", issuer_did);
+    let proof = serde_json::json!({
+        "type": "Ed25519Signature2020",
+        "verificationMethod": verification_method,
+        "proofValue": proof_value,
+        "digest": hex::encode(sha2::Sha256::digest(canonical.as_bytes())),
+    });
+    if let Some(o) = vc.as_object_mut() { o.insert("proof".into(), proof); }
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/identity/commit", base);
+    let resp = client.post(&url)
+        .json(&serde_json::json!({"credential": vc}))
+        .send().await
+        .expect("http");
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn e2e_commit_then_submit_tx_with_identity_and_mine() {
+    // Prepare issuer/subject
+    let issuer_kp = KeyPair::generate();
+    let subject_kp = KeyPair::generate();
+    let issuer_did = did_key_from_pubkey(issuer_kp.public_key());
+    let subject_did = did_key_from_pubkey(subject_kp.public_key());
+
+    // Start server allowing the issuer
+    let (base, _handle) = start_test_server(vec![issuer_did.clone()], &uuid::Uuid::new_v4().to_string()).await;
+
+    // Build signed VC and compute expected commitment hash
+    let vc = build_signed_vc(&issuer_kp, &issuer_did, &subject_did);
+    let mut unsigned = vc.clone();
+    if let Some(obj) = unsigned.as_object_mut() { obj.remove("proof"); }
+    let raw = serde_json::to_string(&unsigned).unwrap();
+    let canonical = canonical_json_str(&raw).unwrap();
+    let wrapper = common::CitizenCredentialWrapper { raw_credential_json: canonical.clone(), canonical_hash_hex: None };
+    let digest = compute_credential_hash(&wrapper).unwrap();
+    let commitment = hash_hex(&digest);
+
+    // POST /api/identity/commit
+    let client = reqwest::Client::new();
+    let commit_url = format!("{}/api/identity/commit", base);
+    let resp = client.post(&commit_url)
+        .json(&serde_json::json!({"credential": vc}))
+        .send().await.expect("http");
+    assert!(resp.status().is_success(), "commit status: {}", resp.status());
+
+    // Confirm public GET
+    let get_url = format!("{}/api/identity/commitments/{}", base, commitment);
+    let get_resp = client.get(&get_url).send().await.expect("get");
+    assert!(get_resp.status().is_success());
+
+    // Construct a signed transaction with identity_ref
+    let tx_kp = KeyPair::generate();
+    let account = Account::new(tx_kp.public_key().clone());
+    let ttype = TransactionType::CreateAccount(account);
+    let mut tx = Transaction::new(ttype, tx_kp.public_key().clone(), tx_kp.sign(b"temp"), 1, 0);
+    let msg = format!("TRANSACTION:{}:{}:{}", tx.id, tx.timestamp, tx.data_hash.to_hex());
+    tx.signature = tx_kp.sign(msg.as_bytes());
+    tx.identity_ref = Some(commitment.clone());
+
+    // Broadcast via /rpc/broadcast_transaction
+    let rpc_url = format!("{}/rpc/broadcast_transaction", base);
+    let bresp = client.post(&rpc_url)
+        .json(&serde_json::json!({"transaction": tx}))
+        .send().await.expect("broadcast");
+    assert!(bresp.status().is_success(), "broadcast status: {}", bresp.status());
+
+    // Mine a block
+    let mine_url = format!("{}/api/blocks/mine", base);
+    let mresp = client.post(&mine_url).send().await.expect("mine");
+    assert!(mresp.status().is_success(), "mine status: {}", mresp.status());
+
+    // Fetch latest block and verify inclusion of our identity_ref
+    let latest_url = format!("{}/api/blocks/latest", base);
+    let lresp = client.get(&latest_url).send().await.expect("latest");
+    assert!(lresp.status().is_success());
+    let block_json: serde_json::Value = lresp.json().await.expect("json");
+    let txs = block_json.get("transactions").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    assert!(!txs.is_empty(), "expected at least one transaction in mined block");
+    let found = txs.iter().any(|t| t.get("identity_ref").and_then(|v| v.as_str()) == Some(commitment.as_str()));
+    assert!(found, "mined block should contain a tx with our identity_ref");
 }

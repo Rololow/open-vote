@@ -132,7 +132,26 @@ try {
     $get = Invoke-RestMethod -Uri "$base/api/identity/commitments/$hash" -Method GET
     if (-not $get.issuer_did) { throw "Missing issuer_did in GET response" }
     Write-Ok "Commitment present. issuer_did=$($get.issuer_did) did=$($get.did)"
-    Write-Host "\nE2E identity flow completed successfully." -ForegroundColor Green
+
+    # Submit a proposal transaction with identity_ref via RPC
+    Write-Step "Submitting a proposal transaction via wallet-cli with identity_ref=$hash"
+    $txResp = & $walletExe create-proposal --title "E2E Test" --description "with identity_ref" --identity-hash $hash --key-file $keyFile --node-url $base
+    if ($LASTEXITCODE -ne 0) { throw "wallet-cli create-proposal failed ($LASTEXITCODE)" }
+    $txIdMatch = ($txResp | Select-String -Pattern 'transaction_id|TRANSACTION' -SimpleMatch | Select-Object -First 1)
+    Write-Ok "Transaction submitted"
+
+    # Trigger mining
+    Write-Step "Triggering mining"
+    $mine = Invoke-RestMethod -Uri "$base/api/blocks/mine" -Method POST
+    if ($mine.status -eq 'success') {
+      Write-Ok "Block mined: number=$($mine.block.number) txs=$($mine.block.transactions)"
+    } elseif ($mine.status -eq 'info') {
+      throw "Mining reported no transactions; expected at least 1"
+    } else {
+      throw "Unexpected mining response: $($mine | ConvertTo-Json -Depth 8)"
+    }
+
+    Write-Host "\nE2E identity + tx submission + mining completed successfully." -ForegroundColor Green
   }
   elseif ($NegativeMode -eq 'DisallowedIssuer') {
     if ($commitExit -eq 0) { throw "Expected vc-commit to fail for DisallowedIssuer, but it exited 0" }

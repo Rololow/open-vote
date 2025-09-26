@@ -3,11 +3,11 @@ use sqlx::{SqlitePool, Row};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
 use std::path::Path;
 use std::str::FromStr;
-use tracing::{info, error};
+use tracing::info;
 use serde_json;
 use std::ffi::OsStr;
 
-use common::{Blockchain, Block, Transaction, Account, Law, Vote};
+use common::{Blockchain, Block, Account, Law, Vote};
 
 /// Gestionnaire de stockage pour la blockchain
 pub struct Storage {
@@ -248,7 +248,7 @@ impl Storage {
 
         for row in rows {
             let id: String = row.get("id");
-            let account_id = uuid::Uuid::parse_str(&id)?;
+            let _account_id = uuid::Uuid::parse_str(&id)?;
             // TODO: Reconstruire l'objet Account depuis les données
         }
 
@@ -408,5 +408,22 @@ impl Storage {
         } else {
             Ok(None)
         }
+    }
+
+    /// Liste les commitments actifs (status='active') avec leur expiration éventuelle
+    pub async fn list_active_identity_commitments(&self) -> Result<Vec<(String, Option<String>)>> {
+        let rows = sqlx::query(
+            r#"SELECT commitment_hash, expires_at FROM identity_commitments WHERE status = 'active'"#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for r in rows {
+            let ch: String = r.get("commitment_hash");
+            let exp: Option<String> = r.try_get("expires_at").ok();
+            out.push((ch, exp));
+        }
+        Ok(out)
     }
 }

@@ -89,8 +89,8 @@ La nouvelle architecture sépare clairement la détention des clés (client) de 
            ▼                                              ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                    Serveur Blockchain Unifié ✅                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                     API Modulaire                                   │  │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                     API Modulaire                                  │  │
 │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐   │  │
 │  │  │ General     │ │ Blockchain  │ │ Accounts    │ │ P2P         │   │  │
 │  │  │ Handlers    │ │ Handlers    │ │ Handlers    │ │ Handlers    │   │  │
@@ -99,8 +99,8 @@ La nouvelle architecture sépare clairement la détention des clés (client) de 
 │  │  │ RPC         │ │ Migrated    │     Types & Routes                │  │
 │  │  │ Handlers    │ │ Handlers    │                                   │  │
 │  │  └─────────────┘ └─────────────┘                                   │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-│  - Communication RPC directe (POST /rpc/broadcast_transaction)            │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│  - Communication RPC directe (POST /rpc/broadcast_transaction)           │
 │  - Validation cryptographique intégrée                                   │
 │  - Consensus et stockage unifiés                                         │
 │  - Endpoints API organisés par domaine fonctionnel                       │
@@ -109,13 +109,13 @@ La nouvelle architecture sépare clairement la détention des clés (client) de 
            ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                        Réseau Blockchain P2P                             │
-│   ┌────────────────┐    ┌────────────────┐    ┌────────────────┐        │
-│   │  Nœud #1       │    │  Nœud #2       │ .. │  Nœud #N       │        │
-│   │ - Consensus    │    │ - Stockage     │    │ - Diffusion    │        │
-│   │ - API Unifiée  │    │ - Propagation  │    │ - Validation   │        │
-│   └────────────────┘    └────────────────┘    └────────────────┘        │
+│   ┌────────────────┐    ┌────────────────┐    ┌────────────────┐         │
+│   │  Nœud #1       │    │  Nœud #2       │ .. │  Nœud #N       │         │
+│   │ - Consensus    │    │ - Stockage     │    │ - Diffusion    │         │
+│   │ - API Unifiée  │    │ - Propagation  │    │ - Validation   │         │
+│   └────────────────┘    └────────────────┘    └────────────────┘         │
 │   Transactions: CreateAccount | CreateProposal | SupportProposal |       │
-│                 CreateLaw | SubmitVote | (extensible)                     │
+│                 CreateLaw | SubmitVote | (extensible)                    │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::{Instant, Duration};
 use tokio::sync::RwLock;
 use anyhow::{Result, Context};
@@ -69,6 +70,8 @@ pub struct BlockchainNode {
     pub peers: Arc<RwLock<HashMap<String, PeerInfo>>>,
     /// Stockage en mémoire des propositions citoyennes (pour démo)
     pub proposals: Arc<RwLock<Vec<Proposal>>>,
+    /// Ensemble des commitments actifs (préparation Phase 3)
+    pub active_commitments: Arc<RwLock<HashSet<String>>>,
 }
 
 impl BlockchainNode {
@@ -150,7 +153,7 @@ impl BlockchainNode {
 
         let blockchain_config = BlockchainConfig::default();
 
-        Ok(Self {
+        let node = Self {
             config,
             blockchain,
             blockchain_config,
@@ -159,7 +162,62 @@ impl BlockchainNode {
             is_mining: Arc::new(RwLock::new(false)),
             peers: Arc::new(RwLock::new(HashMap::new())),
             proposals: Arc::new(RwLock::new(Vec::new())),
-        })
+            active_commitments: Arc::new(RwLock::new(HashSet::new())),
+        };
+
+        // Hydrate active commitments from DB on startup
+        if let Err(e) = node.hydrate_active_commitments().await {
+            warn!("Failed to hydrate active commitments at startup: {}", e);
+        }
+
+        Ok(node)
+    }
+
+    /// Charge en mémoire les commitments actifs depuis la base au démarrage
+    async fn hydrate_active_commitments(&self) -> Result<()> {
+        let rows = self
+            .storage
+            .list_active_identity_commitments()
+            .await
+            .context("list_active_identity_commitments")?;
+        let now = chrono::Utc::now();
+        let mut set = self.active_commitments.write().await;
+        set.clear();
+        let mut kept = 0usize;
+        for (hash, exp_opt) in rows {
+            let keep = match exp_opt.as_deref() {
+                Some(s) => match chrono::DateTime::parse_from_rfc3339(s) {
+                    Ok(dt) => dt.with_timezone(&chrono::Utc) > now,
+                    Err(_) => {
+                        // Format inattendu: conserver prudemment
+                        true
+                    }
+                },
+                None => true,
+            };
+            if keep {
+                set.insert(hash);
+                kept += 1;
+            }
+        }
+        info!("Active commitments hydrated: {} kept", kept);
+
+        // Optionally ensure commitments.log exists and contains at least the hydrated set
+        let dir = std::path::Path::new(&self.config.data_directory);
+        let _ = tokio::fs::create_dir_all(dir).await;
+        let log_path = dir.join("commitments.log");
+        // If file is missing, backfill with current set
+        if tokio::fs::metadata(&log_path).await.is_err() {
+            use tokio::io::AsyncWriteExt;
+            if let Ok(mut f) = tokio::fs::OpenOptions::new().create(true).write(true).open(&log_path).await {
+                for h in set.iter() {
+                    let _ = f.write_all(h.as_bytes()).await;
+                    let _ = f.write_all(b"\n").await;
+                }
+                let _ = f.flush().await;
+            }
+        }
+        Ok(())
     }
 
     /// Obtient l'adresse publique du nœud
@@ -210,6 +268,11 @@ impl BlockchainNode {
             let age = now.duration_since(meta.last_seen).as_secs();
             PeerPublic { address: addr.clone(), last_seen_seconds_ago: age }
         }).collect()
+    }
+
+    /// Retourne une copie du set de commitments actifs (pour inspection/tests)
+    pub async fn list_active_commitments(&self) -> Vec<String> {
+        self.active_commitments.read().await.iter().cloned().collect()
     }
 
     /// Supprime les pairs obsolètes (> max_age)
@@ -449,7 +512,6 @@ impl BlockchainNode {
 
     /// Obtient les statistiques du nœud
     pub async fn get_stats(&self) -> NodeStats {
-        let blockchain = self.blockchain.read().await;
         let blockchain_info = self.get_blockchain_info().await;
         
         NodeStats {
@@ -489,6 +551,25 @@ impl BlockchainNode {
     pub async fn get_all_identities(&self) -> Vec<IdentityRecord> {
         // TODO: Implémenter la récupération réelle depuis la blockchain
         Vec::new()
+    }
+
+    /// Ajoute un commitment actif en mémoire et dans le journal append-only
+    pub async fn add_active_commitment(&self, commitment_hash: &str) {
+        {
+            let mut set = self.active_commitments.write().await;
+            set.insert(commitment_hash.to_string());
+        }
+        // Append to log file in data_directory
+        let dir = std::path::Path::new(&self.config.data_directory);
+        let _ = tokio::fs::create_dir_all(dir).await;
+        let log_path = dir.join("commitments.log");
+        let line = format!("{}\n", commitment_hash);
+        // Use append mode
+        if let Ok(mut f) = tokio::fs::OpenOptions::new().create(true).append(true).open(&log_path).await {
+            use tokio::io::AsyncWriteExt;
+            let _ = f.write_all(line.as_bytes()).await;
+            let _ = f.flush().await;
+        }
     }
 
     // ===========================
@@ -562,6 +643,7 @@ pub struct NodeStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::Storage;
     use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::SqlitePool;
     use std::str::FromStr;
@@ -807,5 +889,60 @@ mod tests {
         assert!(bc.pending_transactions.is_empty());
         // Can't easily check identity_ref here without cloning; ensure the tx in block had identity_ref Some("hash_valid")
         assert_eq!(block.transactions[0].identity_ref.as_deref(), Some("hash_valid"));
+    }
+
+    #[tokio::test]
+    async fn startup_hydrates_active_commitments_non_expired() {
+        ensure_migrations_env();
+        let issuer = "did:key:zIssuer".to_string();
+        let cfg = make_config_with_db(&uuid::Uuid::new_v4().to_string(), vec![issuer.clone()]);
+        ensure_minimal_schema(&cfg.database_url).await;
+
+        // Pre-insert an active, non-expired commitment BEFORE node creation
+        let storage = Storage::new(&cfg.database_url).await.expect("storage");
+        let future = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+        let (_id, _existed) = storage
+            .insert_identity_commitment(
+                "pk1",
+                "did:key:zSubjectHydrate",
+                "hash_hydrate_ok",
+                &issuer,
+                &chrono::Utc::now().to_rfc3339(),
+                Some(&future),
+            )
+            .await
+            .expect("insert");
+
+        // Now create node -> should hydrate set with the above hash
+        let node = BlockchainNode::new(cfg.clone()).await.expect("node");
+        let set = node.list_active_commitments().await;
+        assert!(set.contains(&"hash_hydrate_ok".to_string()));
+    }
+
+    #[tokio::test]
+    async fn startup_hydration_excludes_expired_commitments() {
+        ensure_migrations_env();
+        let issuer = "did:key:zIssuer".to_string();
+        let cfg = make_config_with_db(&uuid::Uuid::new_v4().to_string(), vec![issuer.clone()]);
+        ensure_minimal_schema(&cfg.database_url).await;
+
+        // Pre-insert an active but expired commitment
+        let storage = Storage::new(&cfg.database_url).await.expect("storage");
+        let past = "2000-01-01T00:00:00Z";
+        let (_id, _existed) = storage
+            .insert_identity_commitment(
+                "pk2",
+                "did:key:zSubjectExpired",
+                "hash_hydrate_expired",
+                &issuer,
+                &chrono::Utc::now().to_rfc3339(),
+                Some(past),
+            )
+            .await
+            .expect("insert");
+
+        let node = BlockchainNode::new(cfg.clone()).await.expect("node");
+        let set = node.list_active_commitments().await;
+        assert!(!set.contains(&"hash_hydrate_expired".to_string()));
     }
 }
