@@ -174,6 +174,57 @@ impl Storage {
         Ok(())
     }
 
+    // ==============================
+    // Nullifiers (Phase 3 support)
+    // ==============================
+    /// Insert a nullifier for a given scope; returns Ok(true) if inserted, Ok(false) if it already existed (unique constraint).
+    pub async fn insert_nullifier(&self, scope: &str, nullifier_hex: &str, tx_id: &str) -> Result<bool> {
+        let res = sqlx::query(
+            r#"INSERT INTO nullifiers (scope, nullifier_hex, tx_id) VALUES (?, ?, ?)"#,
+        )
+        .bind(scope)
+        .bind(nullifier_hex)
+        .bind(tx_id)
+        .execute(&self.pool)
+        .await;
+        match res {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                if let sqlx::Error::Database(db_err) = &e {
+                    let msg = db_err.message();
+                    if msg.contains("UNIQUE") {
+                        // Duplicate: already exists
+                        return Ok(false);
+                    }
+                }
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Check if a nullifier exists for a scope.
+    pub async fn has_nullifier(&self, scope: &str, nullifier_hex: &str) -> Result<bool> {
+        let row = sqlx::query_scalar::<_, i64>(
+            r#"SELECT 1 FROM nullifiers WHERE scope = ? AND nullifier_hex = ? LIMIT 1"#,
+        )
+        .bind(scope)
+        .bind(nullifier_hex)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
+    }
+
+    /// Count nullifiers for a scope (debug/introspection).
+    pub async fn count_nullifiers_in_scope(&self, scope: &str) -> Result<i64> {
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*) FROM nullifiers WHERE scope = ?"#,
+        )
+        .bind(scope)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count)
+    }
+
     /// Sauvegarde la blockchain complète
     pub async fn save_blockchain(&self, blockchain: &Blockchain) -> Result<()> {
         info!("Sauvegarde de la blockchain (hauteur: {})", blockchain.height());

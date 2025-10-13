@@ -1,4 +1,4 @@
-use axum::{extract::State, response::Json, http::StatusCode};
+use axum::{extract::State, response::Json};
 use serde_json;
 use super::super::AppState;
 

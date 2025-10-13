@@ -15,6 +15,7 @@ use blockchain_server::node::BlockchainNode;
 use common::canonical_json_str;
 use crypto_lib::KeyPair;
 use sha2::Digest;
+use common::{Transaction, TransactionType, Account};
 
 // Helper: ensure MIGRATIONS_DIR points to the workspace migrations folder
 fn ensure_migrations_env() {
@@ -185,12 +186,20 @@ async fn issuer_verify_signature_alt_fails() {
     // Start server allowing the issuer
     let (base, _handle) = start_test_server(vec![issuer_did.clone()], &uuid::Uuid::new_v4().to_string()).await;
 
-    // Build VC and then alter the signature (proofValue)
+    // Build VC and then alter the signature bytes (flip one bit) but keep length 64
     let mut vc = build_signed_vc(&issuer_kp, &issuer_did, &subject_did);
     if let Some(p) = vc.get_mut("proof") {
         if let Some(obj) = p.as_object_mut() {
             if let Some(v) = obj.get_mut("proofValue") {
-                *v = serde_json::Value::String(format!("{}A", v.as_str().unwrap_or("")));
+                let orig = v.as_str().unwrap_or("");
+                assert!(orig.starts_with('z'));
+                let b58 = &orig[1..];
+                let mut bytes = bs58::decode(b58).into_vec().expect("decode orig sig");
+                assert_eq!(bytes.len(), 64);
+                // flip a bit
+                bytes[0] ^= 0x01;
+                let tampered_b58 = bs58::encode(bytes).into_string();
+                *v = serde_json::Value::String(format!("z{}", tampered_b58));
             }
         }
     }
@@ -206,4 +215,101 @@ async fn issuer_verify_signature_alt_fails() {
     assert_eq!(body["valid"].as_bool(), Some(false));
     let reason = body["reason"].as_str().unwrap_or("");
     assert!(reason.contains("signature invalide"), "unexpected reason: {}", reason);
+}
+
+#[tokio::test]
+async fn e2e_full_issue_commit_submit_via_issuer_endpoint() {
+    // Use a temp issuer key file to avoid cross-test interference
+    let tmp_key = std::env::temp_dir().join(format!("issuer_key_{}.json", uuid::Uuid::new_v4()));
+    std::env::set_var("ISSUER_KEY_PATH", tmp_key.to_string_lossy().to_string());
+
+    // Prepare subject DID
+    let subject_kp = KeyPair::generate();
+    let subject_did = did_key_from_pubkey(subject_kp.public_key());
+
+    // Start server with no allowlist (accept any issuer for this test)
+    let (base, _handle) = start_test_server(vec![], &uuid::Uuid::new_v4().to_string()).await;
+
+    let client = reqwest::Client::new();
+
+    // 1) Issue credential via /issuer/credential
+    let issue_url = format!("{}/issuer/credential", base);
+    let issue_resp = client
+        .post(&issue_url)
+        .json(&serde_json::json!({"subject_did": subject_did}))
+        .send()
+        .await
+        .expect("issue http");
+    assert!(issue_resp.status().is_success(), "issue status: {}", issue_resp.status());
+    let issue_body: serde_json::Value = issue_resp.json().await.expect("issue json");
+    let vc = issue_body
+        .get("credential")
+        .cloned()
+        .expect("credential field");
+
+    // 2) Verify via /issuer/verify
+    let verify_url = format!("{}/issuer/verify", base);
+    let vresp = client
+        .post(&verify_url)
+        .json(&serde_json::json!({"credential": vc.clone()}))
+        .send()
+        .await
+        .expect("verify http");
+    assert!(vresp.status().is_success());
+    let vjson: serde_json::Value = vresp.json().await.expect("verify json");
+    assert_eq!(vjson["valid"].as_bool(), Some(true));
+
+    // 3) Commit via /api/identity/commit
+    let commit_url = format!("{}/api/identity/commit", base);
+    let cresp = client
+        .post(&commit_url)
+        .json(&serde_json::json!({"credential": vc}))
+        .send()
+        .await
+        .expect("commit http");
+    assert!(cresp.status().is_success(), "commit status: {}", cresp.status());
+    let cjson: serde_json::Value = cresp.json().await.expect("commit json");
+    let commitment = cjson["commitment_hash"].as_str().expect("commitment_hash").to_string();
+
+    // 4) Submit a tx referencing the commitment and mine it
+    let tx_kp = KeyPair::generate();
+    let account = Account::new(tx_kp.public_key().clone());
+    let ttype = TransactionType::CreateAccount(account);
+    let mut tx = Transaction::new(ttype, tx_kp.public_key().clone(), tx_kp.sign(b"temp"), 1, 0);
+    let sign_msg = format!(
+        "TRANSACTION:{}:{}:{}",
+        tx.id,
+        tx.timestamp,
+        tx.data_hash.to_hex()
+    );
+    tx.signature = tx_kp.sign(sign_msg.as_bytes());
+    tx.identity_ref = Some(commitment.clone());
+
+    let rpc_url = format!("{}/rpc/broadcast_transaction", base);
+    let bresp = client
+        .post(&rpc_url)
+        .json(&serde_json::json!({"transaction": tx}))
+        .send()
+        .await
+        .expect("broadcast http");
+    assert!(bresp.status().is_success(), "broadcast status: {}", bresp.status());
+
+    let mine_url = format!("{}/api/blocks/mine", base);
+    let mresp = client.post(&mine_url).send().await.expect("mine http");
+    assert!(mresp.status().is_success(), "mine status: {}", mresp.status());
+
+    let latest_url = format!("{}/api/blocks/latest", base);
+    let lresp = client.get(&latest_url).send().await.expect("latest http");
+    assert!(lresp.status().is_success());
+    let block_json: serde_json::Value = lresp.json().await.expect("latest json");
+    let txs = block_json
+        .get("transactions")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(!txs.is_empty(), "expected at least one transaction");
+    let found = txs
+        .iter()
+        .any(|t| t.get("identity_ref").and_then(|v| v.as_str()) == Some(commitment.as_str()));
+    assert!(found, "mined block should contain a tx with our identity_ref");
 }

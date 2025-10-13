@@ -2,7 +2,7 @@
 
 **Objectif Stratégique :** Remplacer le système d'attestation propriétaire par des **Identifiants Décentralisés (DID)** et des **Crédentiels Vérifiables (Verifiable Credentials - VC)** afin de préparer l'anonymisation (Phase 3) et d'éliminer le point de défaillance unique.
 
-**Statut :** 🚧 En cours – Issuer opérationnel (signature réelle, did:key). Commitment hash + stockage idempotent en DB avec migrations appliquées (Partie 3 terminée). Endpoint `/issuer/verify` implémenté et clé issuer persistée sur disque. Côté nœud: validation `identity_ref` en place à la soumission (mempool), au minage (pré-filtrage) et lors de la réception de blocs, plus endpoint public `GET /identity/commitments/:hash`. Sous-commandes wallet (did/vc) en place et endpoint explicite `POST /api/identity/commit` implémenté. Tests d’intégration négatifs ajoutés (signature invalide, digest mismatch, VC expiré). E2E étendu: soumission d’une transaction avec `identity_ref` et minage vérifié. 
+**Statut :** 🚧 En cours – Issuer opérationnel (signature réelle, did:key). Commitment hash + stockage idempotent en DB avec migrations appliquées (Partie 3 terminée). Endpoint `/issuer/verify` implémenté et clé issuer persistée sur disque. Côté nœud: validation `identity_ref` en place à la soumission (mempool), au minage (pré-filtrage) et lors de la réception de blocs, plus endpoint public `GET /identity/commitments/:hash`. Sous-commandes wallet (did/vc) en place et endpoint explicite `POST /api/identity/commit` implémenté. Tests d’intégration négatifs ajoutés (signature invalide, digest mismatch, VC expiré). E2E étendu: soumission d’une transaction avec `identity_ref` et minage vérifié. Bench 7.7 implémenté (Criterion) pour la vérification VC. Outil Merkle root (`compute_root`) + script snapshot quotidien disponibles.
 
 **Sortie Attendue de la Phase 2 :**
 - Un émetteur de crédentiels ("issuer") opérationnel (service ou module) capable d'émettre un VC signé Ed25519 (format JSON-LD ou JWT).
@@ -135,7 +135,12 @@ identity_commitments(
 - [x] 7.4 Int: VC expiré → rejet commit
  - [x] 7.5 Int: issuer inconnu → rejet
   - [x] 7.6 Int: double commit même VC → idempotent (test d'idempotence existant)
-- [ ] 7.7 Bench (optionnel) : coût vérif VC (< X ms cible)
+- [x] 7.7 Bench (optionnel) : coût vérif VC (< X ms cible)
+  - Baseline locale (Windows, bench profile):
+    - canonicalize_unsigned ≈ 6.9–7.1 µs
+    - digest_sha256_hex ≈ 0.58–0.67 µs
+    - ed25519_verify ≈ 51–62 µs
+    - e2e_canon_digest_verify ≈ 59–63 µs
   - [x] (Nouveau) 7.8 Int: endpoint /issuer/verify une fois implémenté
 
 Notes tests supplémentaires réalisés:
@@ -143,27 +148,27 @@ Notes tests supplémentaires réalisés:
 
 ---
 ## 🔄 Partie 8 : Sécurité & Gestion Clés Issuer
-- [ ] 8.1 Génération clé Ed25519 offline (script) + import
-- [ ] 8.2 Rotation clé (préparer champ `kid` dans JWK)
-- [ ] 8.3 Empêcher log accidentel du VC complet (audit logging => hash seulement)
-- [ ] 8.4 Vérifier absence de stockage clés privées côté DB (scan code)
-- [ ] 8.5 Variable d'env : `ISSUER_KEY_PATH`, `ISSUER_PUBKEY_EXPORT`
+- [x] 8.1 Génération clé Ed25519 offline (outil + script) & import `--import-private-hex` (tests d’intégration)
+- [x] 8.2 Préparation rotation clé: `kid` déterministe (ed25519-<pubhex_prefix>) dans JWK, export public via CLI et API
+ - [x] 8.3 Empêcher log accidentel du VC complet (audit logging => hash seulement)
+ - [x] 8.4 Vérifier absence de stockage clés privées côté DB (scan code)
+- [x] 8.5 Variables d'env : `ISSUER_KEY_PATH`, `ISSUER_PUBKEY_EXPORT`, `ISSUER_VC_VALIDITY_DAYS`
 
 **Critères Acceptation :** Redémarrage service n'invalide pas VC précédents.
 
 ---
 ## 🧭 Partie 9 : Préparation Phase 3 (ZKP)
-- [ ] 9.1 Ajouter module `zkp_prelude.rs` (placeholder) avec trait `IdentityAccumulator`
-- [ ] 9.2 Enregistrer chaque `commitment_hash` dans un fichier append-only (`commitments.log`)
-- [ ] 9.3 Script utilitaire génère Merkle root depuis log (rust binaire `tools/compute_root.rs`)
-- [ ] 9.4 Documenter format log (une ligne = hex(hash))
+- [x] 9.1 Ajouter module `zkp_prelude.rs` (placeholder) avec trait `IdentityAccumulator` (+ MerkleAccumulator in‑memory)
+- [x] 9.2 Enregistrer chaque `commitment_hash` dans un fichier append-only (`commitments.log`)
+- [x] 9.3 Script/outil utilitaire génère Merkle root depuis log (binaire `blockchain-server/src/bin/compute_root.rs` + script `scripts/compute_commitments_root.ps1`)
+- [x] 9.4 Documenter format log (une ligne = hex(hash))
 
 **Critères Acceptation :** Génération Merkle root reproductible sur deux environnements.
 
 ---
 ## ⚙️ Partie 11 : Scripts & Automatisation
 - [x] 11.1 Script PowerShell `scripts/identity_flow.ps1` exécutant flow VC (did gen → vc request → commit → tx)
-- [ ] 11.2 Script bash équivalent (pour CI Linux) `scripts/identity_flow.sh`
+- [x] 11.2 Script bash équivalent (pour CI Linux) `scripts/identity_flow.sh`
 - [ ] 11.3 Job CI (GitHub Actions futur) : matrice `{ identity=on, identity=off }` sur `cargo check` + tests
 - [ ] 11.4 Ajout d'un binaire utilitaire interne `tools/canonical_check.rs` (valide hash d'un VC passé en argument)
 - [ ] 11.5 Tâche cargo alias: `[alias] vc-hash = "run -p common --features identity --example hash_vc"`
@@ -175,9 +180,9 @@ Notes tests supplémentaires réalisés:
 ## 🗂️ Partie 10 : Documentation & DX
 - [ ] 10.1 Mise à jour `ARCHITECTURE_REDESIGN.md` section identité (remplacer attestation propriétaire)
 - [x] 10.2 Nouveau README segment "Cycle de Vie d'un VC"
-- [ ] 10.3 Ajouter schéma PlantUML / Mermaid (issuer ↔ wallet ↔ blockchain)
-- [ ] 10.4 Guide troubleshooting (erreurs fréquentes : signature invalide, issuer inconnu, hash mismatch)
-- [ ] 10.5 Exemple JSON VC minimal dans `docs/examples/vc_citizen.json`
+- [x] 10.3 Ajouter schéma PlantUML / Mermaid (issuer ↔ wallet ↔ blockchain)
+- [x] 10.4 Guide troubleshooting (erreurs fréquentes : signature invalide, issuer inconnu, hash mismatch)
+- [x] 10.5 Exemple JSON VC minimal dans `docs/examples/vc_citizen.json`
 
 **Critères Acceptation :** Nouveau contributeur peut exécuter le flow en < 10 min via doc.
 
@@ -217,34 +222,13 @@ wallet did generate \
 5. (Parties 8 & 9) => Sécurité + préparation ZKP
 6. (Partie 10) => Documentation finalisation
 
----
-## ✅ Prochaines Actions Immédiates (Sprint 2 Phase 2 - mise à jour)
-### Complété ce sprint précédent
-- Implémentation dérivation réelle `did:key` (multicodec 0xED01 + base58btc)
-- Signature Ed25519 réelle + preuve prototypée
-- Calcul & insertion `commitment_hash` (idempotence garantie via UNIQUE)
-- Logging issuance (hash + digest + prefix signature)
-- Test intégration idempotence
-
-### À faire maintenant
-- [x] Script PowerShell `identity_flow.ps1` (request VC → hash local → submit → mine) (11.1)
-- [x] Endpoint `/issuer/verify` (validation signature + dates + hash recompute)
-- [x] Persistance durable clé issuer (ne plus régénérer à chaque démarrage) + test redémarrage
-- [x] Migration SQL dédiée (3.2) pour `identity_commitments` (fichier versionné)
-- [x] Liste émetteurs autorisés (5.1) + validation côté transactions (soumission/minage/réception)
-- [x] Sous-commandes wallet CLI (4.x): `did generate`, `vc request`, `vc show`, `vc commit` (persistance locale)
-- [x] Endpoint lecture `GET /identity/commitments/:hash` (5.5)
-- [x] Tests d'intégration négatifs `/api/identity/commit`: signature invalide, digest mismatch, VC expiré (7.4/7.5)
-- [x] E2E intégration: submit tx avec `identity_ref` et minage (7.3)
-- [x] `wallet-cli create-proposal --identity-hash` pour attacher `identity_ref` via /rpc
-- [x] Tests unitaires nœud: rejet unknown/expired/disallowed + filtrage mempool/minage
-
 ### Étape suivante proposée
 - [x] 4.5 Vérification expiration locale avant `vc commit` (wallet) — fail-fast
-- [x] 11.2 Script bash équivalent `scripts/identity_flow.sh` (CI Linux)
 - [x] 5.4 Préparer hook Phase 3: set mémoire `ACTIVE_COMMITMENTS` (source future Merkle)
-- [ ] 9.2/9.3 Journal append-only `commitments.log` + outil Merkle root (`tools/compute_root.rs`)
+- [x] 7.7 Bench VC verify (criterion) — coût signature + canonisation
+- [x] 9.2/9.3 Journal append-only `commitments.log` + outil Merkle root (CLI + script)
+- [ ] 9.4 Documenter format du log `commitments.log` dans la doc (une ligne = hex(hash))
 - [ ] 10.3 Diagramme (issuer ↔ wallet ↔ blockchain) + 10.4 Guide troubleshooting
-- [ ] 7.1 Unit tests VC parsing/verify (niveau lib) pour compléter la couverture
+- [ ] 11.2 Script bash équivalent `scripts/identity_flow.sh` (CI Linux)
 
-**En cours / à enchainer immédiatement.**
+**En cours / à enchaîner immédiatement :**

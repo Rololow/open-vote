@@ -24,3 +24,96 @@ hex = "0.4"
 bs58 = "0.5"
 base64ct = { version = "1.6", features = ["alloc"] }
 shellexpand = "3.1"
+
+[features]
+default = []
+zkp_groth16 = [
+	"dep:ark-bn254",
+	"dep:ark-ff",
+	"dep:ark-groth16",
+	"dep:ark-relations",
+	"dep:ark-serialize",
+	"dep:ark-snark",
+	"dep:ark-r1cs-std",
+	"dep:arkworks-gadgets",
+	"dep:rand",
+	"dep:sha2",
+    "dep:ark-crypto-primitives",
+    "dep:ark-sponge",
+	"dep:bincode",
+]
+
+zkp_debug = []
+zkp_halo2 = [
+	"dep:halo2_proofs",
+	"dep:pasta_curves",
+]
+
+[dependencies.ark-bn254]
+version = "0.4"
+optional = true
+
+[dependencies.ark-ff]
+version = "0.4"
+optional = true
+
+[dependencies.ark-groth16]
+version = "0.4"
+optional = true
+
+[dependencies.ark-relations]
+version = "0.4"
+optional = true
+
+[dependencies.ark-serialize]
+version = "0.4"
+optional = true
+
+[dependencies.ark-snark]
+version = "0.4"
+optional = true
+
+[dependencies.rand]
+version = "0.8"
+optional = true
+
+[dependencies.sha2]
+version = "0.10"
+optional = true
+
+[dependencies.ark-r1cs-std]
+version = "0.4"
+optional = true
+
+
+[dependencies.arkworks-gadgets]
+version = "0.4"
+optional = true
+
+[dependencies.ark-crypto-primitives]
+version = "0.4"
+optional = true
+features = ["r1cs", "crh", "std"]
+
+[dependencies.ark-sponge]
+version = "0.4.0-alpha"
+optional = true
+features = ["std"]
+
+[dependencies.bincode]
+version = "1.3"
+optional = true
+
+[dev-dependencies]
+tempfile = "3.6"
+
+### Note: halo2 deps intentionally omitted here to avoid yanked transitive deps in this environment.
+### To enable a real Halo2 POC, add `halo2_proofs` and a curve crate (e.g. `pasta_curves`) with compatible versions.
+
+[dependencies.halo2_proofs]
+git = "https://github.com/zcash/halo2"
+optional = true
+
+[dependencies.pasta_curves]
+git = "https://github.com/zcash/pasta_curves"
+optional = true

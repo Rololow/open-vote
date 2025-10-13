@@ -426,6 +426,23 @@ impl Blockchain {
                     self.identity_index.remove(&att.national_id_hash);
                 }
             }
+            // ===== Anonymous actions (Phase 3 - stub apply) =====
+            #[cfg(feature = "identity")]
+            TransactionType::AnonymousVote { law_id, proof: _ } => {
+                // For MVP, the node-side verifier will validate off-chain/nullifier DB before applying state.
+                // State mutation could be: append a vote tally increment or materialize a pseudo-vote.
+                if !self.laws.contains_key(law_id) {
+                    return Err(BlockchainError::InvalidTransaction("Loi introuvable".to_string()));
+                }
+                // No direct state mutation yet; placeholder accept.
+            }
+            #[cfg(feature = "identity")]
+            TransactionType::AnonymousSupport { proposal_id, proof: _ } => {
+                if !self.proposals.contains_key(proposal_id) {
+                    return Err(BlockchainError::InvalidTransaction("Proposition introuvable".to_string()));
+                }
+                // Placeholder: in future, increment supporters_count using a nullifier DB to prevent duplicates.
+            }
         }
         
         Ok(())

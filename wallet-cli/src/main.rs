@@ -1,14 +1,30 @@
+//! wallet-cli — command-line wallet utility for the e-government blockchain.
+//!
+//! Provides simple commands to generate keys, interact with the node API,
+//! request VCs from an issuer and produce (mock) anonymous actions for demo
+//! purposes. Some ZKP-related commands are available behind the
+//! `zkp_groth16` feature.
+//!
+//! Example:
+//!
+//! ```no_run
+//! wallet-cli generate-keypair --output private_key.pem
+//! ```
+
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 use std::path::PathBuf;
 use tracing::{info, error};
-use chrono::Utc;
 
 mod identity;
+#[cfg(feature = "zkp_groth16")]
+mod zkp;
+#[cfg(feature = "zkp_halo2")]
+mod zkp_halo2;
 
 #[derive(Parser)]
 #[command(name = "wallet-cli")]
-#[command(about = "Client en ligne de commande pour le système e-gouvernement blockchain")]
+    #[command(about = "Command-line client for the e-government blockchain system")]
 #[command(version = "0.1.0")]
 struct Cli {
     #[command(subcommand)]
@@ -22,6 +38,138 @@ enum Commands {
         /// Chemin où sauvegarder la clé privée
         #[arg(short, long, default_value = "private_key.pem")]
         output: PathBuf,
+    },
+    /// Affiche la racine d'identité courante du nœud
+    IdentityRoot {
+        /// Adresse du nœud blockchain
+        #[arg(long, default_value = "http://localhost:3000")]
+        node_url: String,
+    },
+    /// Soumet un support anonyme (mock) avec nullifier dérivé localement
+    AnonymousSupportMock {
+        /// ID de la proposition (UUID)
+        #[arg(long)]
+        proposal_id: String,
+        /// Fichier de clé privée (32 octets hex) pour dériver un secret stable
+        #[arg(short, long, default_value = "private_key.pem")]
+        key_file: PathBuf,
+        /// Adresse du nœud blockchain
+        #[arg(long, default_value = "http://localhost:3000")]
+        node_url: String,
+    },
+    /// Soumet un vote anonyme (mock) avec nullifier dérivé localement
+    AnonymousVoteMock {
+        /// ID de la loi (UUID)
+        #[arg(long)]
+        law_id: String,
+        /// Fichier de clé privée (32 octets hex) pour dériver un secret stable
+        #[arg(short, long, default_value = "private_key.pem")]
+        key_file: PathBuf,
+        /// Adresse du nœud blockchain
+        #[arg(long, default_value = "http://localhost:3000")]
+        node_url: String,
+    },
+    /// Génére des clés VK/PK de démonstration pour la preuve Groth16 (placeholder)
+    #[cfg(feature = "zkp_groth16")]
+    ZkpSetupKeys {
+        /// Répertoire de données (doit être le même que le nœud utilise)
+        #[arg(long, default_value = "./data")]
+        data_dir: String,
+        /// Version de VK/PK à écrire
+        #[arg(long, default_value_t = 1)]
+        vk_version: u32,
+    },
+    /// Soumet un support anonyme avec une vraie preuve Groth16 (placeholder circuit)
+    #[cfg(feature = "zkp_groth16")]
+    AnonymousSupport {
+        /// ID de la proposition (UUID)
+        #[arg(long)]
+        proposal_id: String,
+        /// Chemin de la clé privée (32 octets hex)
+        #[arg(short, long, default_value = "private_key.pem")]
+        key_file: PathBuf,
+        /// Fichier VC JSON pour calculer le commitment
+        #[arg(long)]
+        vc_file: PathBuf,
+        /// Adresse du nœud blockchain
+        #[arg(long, default_value = "http://localhost:3000")]
+        node_url: String,
+        /// Répertoire de données contenant pk/vk
+        #[arg(long, default_value = "./data")]
+        data_dir: String,
+        /// Version VK/PK à utiliser
+        #[arg(long, default_value_t = 1)]
+        vk_version: u32,
+    },
+    /// Soumet un vote anonyme avec une vraie preuve Groth16 (placeholder circuit)
+    #[cfg(feature = "zkp_groth16")]
+    AnonymousVote {
+        /// ID de la loi (UUID)
+        #[arg(long)]
+        law_id: String,
+        /// Chemin de la clé privée (32 octets hex)
+        #[arg(short, long, default_value = "private_key.pem")]
+        key_file: PathBuf,
+        /// Fichier VC JSON pour calculer le commitment
+        #[arg(long)]
+        vc_file: PathBuf,
+        /// Adresse du nœud blockchain
+        #[arg(long, default_value = "http://localhost:3000")]
+        node_url: String,
+        /// Répertoire de données contenant pk/vk
+        #[arg(long, default_value = "./data")]
+        data_dir: String,
+        /// Version VK/PK à utiliser
+        #[arg(long, default_value_t = 1)]
+        vk_version: u32,
+    },
+    /// Produce and save a Groth16 proof to disk (for node consumption)
+    #[cfg(feature = "zkp_groth16")]
+    ZkpProve {
+        /// Data dir containing pk/vk/poseidon params
+        #[arg(long, default_value = "./data")]
+        data_dir: String,
+        /// VK/PK version to use
+        #[arg(long, default_value_t = 1)]
+        vk_version: u32,
+        /// Public root (32-byte hex)
+        #[arg(long)]
+        root_hex: String,
+        /// Scope string
+        #[arg(long)]
+        scope: String,
+        /// Nullifier hex (32-byte hex)
+        #[arg(long)]
+        nullifier_hex: String,
+        /// Leaf hex (32-byte hex)
+        #[arg(long)]
+        leaf_hex: String,
+        /// Secret hex (32-byte hex)
+        #[arg(long)]
+        secret_hex: String,
+        /// Merkle path siblings as repeated --sib <hex>
+        #[arg(long = "sib", num_args = 1..)]
+        merkle_path: Vec<String>,
+        /// Directions string (e.g. 0101... '0' for left, '1' for right)
+        #[arg(long)]
+        directions: String,
+        /// Output JSON file path to write proof envelope
+        #[arg(long, default_value = "zkp_proof.json")]
+        out: PathBuf,
+    },
+    /// Generate and save Poseidon parameters to wallet-cli/zkp/poseidon_params.bin
+    #[cfg(feature = "zkp_groth16")]
+    ZkpGenPoseidonParams {
+        /// Data dir for wallet-cli (where zkp/poseidon_params.bin will be written)
+        #[arg(long, default_value = "./wallet-cli")]
+        data_dir: String,
+    },
+    /// Produce a minimal Halo2 proof (POC)
+    #[cfg(feature = "zkp_halo2")]
+    Halo2Prove {
+        /// Output path for POC proof JSON
+        #[arg(long, default_value = "halo2_poc.json")]
+        out: PathBuf,
     },
     /// Charge une paire de clés depuis un fichier
     LoadKeypair {
@@ -127,11 +275,96 @@ async fn main() -> Result<()> {
             create_proposal(&title, &description, identity_hash, &key_file, &node_url).await
         }
         Commands::DidGenerate { key_file } => did_generate(&key_file).await,
-    Commands::VcRequest { endpoint, subject_did, out_dir } => identity::vc_request(&endpoint, &subject_did, &out_dir).await,
-    Commands::VcHash { file } => identity::vc_hash(&file).await,
-    Commands::VcShow { file, hash, dir } => identity::vc_show(file, hash, &dir).await,
-    Commands::VcCommit { file, hash, dir, node_url, issuer_endpoint } => identity::vc_commit(file, hash, &dir, &node_url, issuer_endpoint.as_deref()).await,
+        Commands::VcRequest { endpoint, subject_did, out_dir } => identity::vc_request(&endpoint, &subject_did, &out_dir).await,
+        Commands::VcHash { file } => identity::vc_hash(&file).await,
+        Commands::VcShow { file, hash, dir } => identity::vc_show(file, hash, &dir).await,
+        Commands::VcCommit { file, hash, dir, node_url, issuer_endpoint } => identity::vc_commit(file, hash, &dir, &node_url, issuer_endpoint.as_deref()).await,
+        Commands::IdentityRoot { node_url } => identity_root(&node_url).await,
+        Commands::AnonymousSupportMock { proposal_id, key_file, node_url } => anonymous_support_mock(&proposal_id, &key_file, &node_url).await,
+        Commands::AnonymousVoteMock { law_id, key_file, node_url } => anonymous_vote_mock(&law_id, &key_file, &node_url).await,
+        #[cfg(feature = "zkp_groth16")]
+        Commands::ZkpSetupKeys { data_dir, vk_version } => zkp_setup_keys(&data_dir, vk_version).await,
+        #[cfg(feature = "zkp_groth16")]
+        Commands::AnonymousSupport { proposal_id, key_file, vc_file, node_url, data_dir, vk_version } => anonymous_support_real(&proposal_id, &key_file, &vc_file, &node_url, &data_dir, vk_version).await,
+        #[cfg(feature = "zkp_groth16")]
+        Commands::AnonymousVote { law_id, key_file, vc_file, node_url, data_dir, vk_version } => anonymous_vote_real(&law_id, &key_file, &vc_file, &node_url, &data_dir, vk_version).await,
+        #[cfg(feature = "zkp_groth16")]
+        Commands::ZkpProve { data_dir, vk_version, root_hex, scope, nullifier_hex, leaf_hex, secret_hex, merkle_path, directions, out } => zkp_prove_cli(&data_dir, vk_version, &root_hex, &scope, &nullifier_hex, &leaf_hex, &secret_hex, &merkle_path, &directions, &out).await,
+    #[cfg(feature = "zkp_groth16")]
+    Commands::ZkpGenPoseidonParams { data_dir } => zkp_gen_poseidon_params(&data_dir),
+        #[cfg(feature = "zkp_halo2")]
+        Commands::Halo2Prove { out } => zkp_halo2::halo2_prove(&out).await,
     }
+}
+
+#[cfg(feature = "zkp_groth16")]
+fn zkp_gen_poseidon_params(data_dir: &str) -> Result<()> {
+    use crate::zkp::generate_and_save_poseidon_params;
+    generate_and_save_poseidon_params(data_dir)?;
+    println!("✅ Poseidon parameters generated and saved to {}/zkp/poseidon_params.bin", data_dir);
+    Ok(())
+}
+
+#[cfg(feature = "zkp_groth16")]
+async fn zkp_prove_cli(
+    data_dir: &str,
+    vk_version: u32,
+    root_hex: &str,
+    scope: &str,
+    nullifier_hex: &str,
+    leaf_hex: &str,
+    secret_hex: &str,
+    merkle_path: &Vec<String>,
+    directions: &str,
+    out: &PathBuf,
+) -> Result<()> {
+    use crate::zkp::prove_membership_nullifier;
+    use std::fs::File;
+    use std::io::Write;
+
+    println!("Producing proof (this may take a while)...");
+
+    let merkle_path_refs: Vec<&str> = merkle_path.iter().map(|s| s.as_str()).collect();
+    let (proof_bytes, pub_inputs) = prove_membership_nullifier(
+        data_dir,
+        vk_version,
+        root_hex,
+        scope,
+        nullifier_hex,
+        leaf_hex,
+        secret_hex,
+        &merkle_path_refs,
+        directions,
+    )?;
+
+    // Serialize proof bytes to a binary file alongside the JSON
+    let mut bin_path = out.clone();
+    bin_path.set_extension("bin");
+    let mut bin_f = File::create(&bin_path)?;
+    bin_f.write_all(&proof_bytes)?;
+
+    // Prepare JSON envelope
+    use ark_ff::{PrimeField, BigInteger};
+    let public_inputs_hex: Vec<String> = pub_inputs.iter().map(|fr| {
+        let bytes = fr.into_bigint().to_bytes_be();
+        hex::encode(bytes)
+    }).collect();
+
+    let envelope = serde_json::json!({
+        "scheme": "Groth16",
+        "vk_version": vk_version,
+        "root": root_hex,
+        "scope": scope,
+        "nullifier": nullifier_hex,
+        "proof_file": bin_path.to_string_lossy(),
+        "public_inputs": public_inputs_hex,
+    });
+
+    let mut f = File::create(out)?;
+    f.write_all(serde_json::to_string_pretty(&envelope)?.as_bytes())?;
+
+    println!("Proof written to {} and {}", out.display(), bin_path.display());
+    Ok(())
 }
 
 async fn generate_keypair(output_path: &PathBuf) -> Result<()> {
@@ -294,3 +527,317 @@ async fn did_generate(key_file: &PathBuf) -> Result<()> {
 }
 
 // Identity-specific helper functions moved to identity.rs module.
+
+async fn identity_root(node_url: &str) -> Result<()> {
+    let url = format!("{}/identity/root", node_url.trim_end_matches('/'));
+    let res = reqwest::get(&url).await?;
+    if !res.status().is_success() {
+        anyhow::bail!("{}: {}", res.status(), res.text().await?);
+    }
+    let v: serde_json::Value = res.json().await?;
+    println!("{}", serde_json::to_string_pretty(&v)?);
+    Ok(())
+}
+
+async fn anonymous_support_mock(proposal_id: &str, key_file: &PathBuf, node_url: &str) -> Result<()> {
+    use crypto_lib::KeyPair;
+    use common::{Transaction, TransactionType};
+    use common::identity::zkp_prelude::{AnonymousActionPayload, ProofEnvelope, ProofScheme, compute_scoped_nullifier_hex};
+
+    // Load private key and derive a stable 32-byte secret
+    let priv_hex = std::fs::read_to_string(key_file)?;
+    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
+    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
+    let mut secret = [0u8; 32]; secret.copy_from_slice(&priv_bytes_vec);
+    let kp = KeyPair::from_private_bytes(&secret);
+
+    // Fetch current root
+    let root_resp = reqwest::get(format!("{}/identity/root", node_url.trim_end_matches('/'))).await?;
+    if !root_resp.status().is_success() { anyhow::bail!("root fetch failed: {}", root_resp.status()); }
+    let root_json: serde_json::Value = root_resp.json().await?;
+    let root_hex = root_json.get("root").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("root missing"))?.to_string();
+
+    // Build scope and nullifier
+    let scope = format!("support:{}", proposal_id);
+    let nullifier_hex = compute_scoped_nullifier_hex(&scope, &secret);
+
+    // Build proof envelope (mock: scheme Groth16, vk_version 42, proof bytes "OK" for mock verifier)
+    let env = ProofEnvelope {
+        scheme: ProofScheme::Groth16,
+        vk_version: 42,
+        root_hex: root_hex,
+        scope: scope.clone(),
+        nullifier_hex: nullifier_hex,
+        proof: b"OK".to_vec(),
+        public_inputs: vec![],
+    };
+    let payload = AnonymousActionPayload { proof_envelope: env, payload: None };
+
+    // Build and sign transaction
+    let mut tx = Transaction::new(
+        TransactionType::AnonymousSupport { proposal_id: uuid::Uuid::parse_str(proposal_id)?, proof: payload },
+        kp.public_key().clone(),
+        kp.sign(b"temp"),
+        0,
+        0,
+    );
+    let sign_msg = format!("TRANSACTION:{}:{}:{}", tx.id, tx.timestamp, tx.data_hash.to_hex());
+    tx.signature = kp.sign(sign_msg.as_bytes());
+
+    // Submit via RPC
+    let rpc_url = format!("{}/rpc/broadcast_transaction", node_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let response = client.post(&rpc_url).json(&serde_json::json!({"transaction": tx})).send().await?;
+    if response.status().is_success() {
+        let v: serde_json::Value = response.json().await?;
+        println!("{}", serde_json::to_string_pretty(&v)?);
+        Ok(())
+    } else {
+        anyhow::bail!("{}: {}", response.status(), response.text().await?)
+    }
+}
+
+async fn anonymous_vote_mock(law_id: &str, key_file: &PathBuf, node_url: &str) -> Result<()> {
+    use crypto_lib::KeyPair;
+    use common::{Transaction, TransactionType};
+    use common::identity::zkp_prelude::{AnonymousActionPayload, ProofEnvelope, ProofScheme, compute_scoped_nullifier_hex};
+
+    // Load private key and derive a stable 32-byte secret
+    let priv_hex = std::fs::read_to_string(key_file)?;
+    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
+    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
+    let mut secret = [0u8; 32]; secret.copy_from_slice(&priv_bytes_vec);
+    let kp = KeyPair::from_private_bytes(&secret);
+
+    // Fetch current root
+    let root_resp = reqwest::get(format!("{}/identity/root", node_url.trim_end_matches('/'))).await?;
+    if !root_resp.status().is_success() { anyhow::bail!("root fetch failed: {}", root_resp.status()); }
+    let root_json: serde_json::Value = root_resp.json().await?;
+    let root_hex = root_json.get("root").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("root missing"))?.to_string();
+
+    // Build scope and nullifier
+    let scope = format!("vote:{}", law_id);
+    let nullifier_hex = compute_scoped_nullifier_hex(&scope, &secret);
+
+    // Build proof envelope (mock)
+    let env = ProofEnvelope {
+        scheme: ProofScheme::Groth16,
+        vk_version: 42,
+        root_hex: root_hex,
+        scope: scope.clone(),
+        nullifier_hex: nullifier_hex,
+        proof: b"OK".to_vec(),
+        public_inputs: vec![],
+    };
+    let payload = AnonymousActionPayload { proof_envelope: env, payload: None };
+
+    // Build and sign transaction
+    let mut tx = Transaction::new(
+        TransactionType::AnonymousVote { law_id: uuid::Uuid::parse_str(law_id)?, proof: payload },
+        kp.public_key().clone(),
+        kp.sign(b"temp"),
+        0,
+        0,
+    );
+    let sign_msg = format!("TRANSACTION:{}:{}:{}", tx.id, tx.timestamp, tx.data_hash.to_hex());
+    tx.signature = kp.sign(sign_msg.as_bytes());
+
+    // Submit via RPC
+    let rpc_url = format!("{}/rpc/broadcast_transaction", node_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let response = client.post(&rpc_url).json(&serde_json::json!({"transaction": tx})).send().await?;
+    if response.status().is_success() {
+        let v: serde_json::Value = response.json().await?;
+        println!("{}", serde_json::to_string_pretty(&v)?);
+        Ok(())
+    } else {
+        anyhow::bail!("{}: {}", response.status(), response.text().await?)
+    }
+}
+
+#[cfg(feature = "zkp_groth16")]
+async fn zkp_setup_keys(data_dir: &str, vk_version: u32) -> Result<()> {
+    use crate::zkp::setup_placeholder_keys;
+    setup_placeholder_keys(data_dir, vk_version)?;
+    println!("✅ Clés VK/PK générées dans {}/zkp pour vk_version={}", data_dir, vk_version);
+    Ok(())
+}
+
+#[cfg(feature = "zkp_groth16")]
+async fn anonymous_support_real(proposal_id: &str, key_file: &PathBuf, vc_file: &PathBuf, node_url: &str, data_dir: &str, vk_version: u32) -> Result<()> {
+    use crypto_lib::KeyPair;
+    use common::{Transaction, TransactionType};
+    use common::identity::zkp_prelude::{AnonymousActionPayload, ProofEnvelope, ProofScheme, compute_scoped_nullifier_hex};
+    use crate::zkp::prove_membership_nullifier;
+
+    // Load private key and derive stable secret
+    let priv_hex = std::fs::read_to_string(key_file)?;
+    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
+    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
+    let mut secret = [0u8; 32]; secret.copy_from_slice(&priv_bytes_vec);
+    let kp = KeyPair::from_private_bytes(&secret);
+
+    // Compute commitment hash from VC
+    let vc_json = std::fs::read_to_string(vc_file)?;
+    let vc_value: serde_json::Value = serde_json::from_str(&vc_json)?;
+    let commitment_hash = identity::vc_compute_hash(&vc_value)?;
+    let leaf_hex = commitment_hash.clone();
+
+    // Fetch Merkle proof from node
+    let proof_url = format!("{}/identity/proof/{}", node_url.trim_end_matches('/'), commitment_hash);
+    let proof_resp = reqwest::get(&proof_url).await?;
+    if !proof_resp.status().is_success() { anyhow::bail!("proof fetch failed: {}", proof_resp.status()); }
+    let proof_json: serde_json::Value = proof_resp.json().await?;
+    let path_array = proof_json.get("path").and_then(|v| v.as_array()).ok_or_else(|| anyhow::anyhow!("path missing"))?;
+    let mut merkle_path_hex = Vec::new();
+    let mut directions = String::new();
+    for item in path_array {
+        let sib_hex = item.get(0).and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("sib hex missing"))?;
+        let is_left = item.get(1).and_then(|v| v.as_bool()).ok_or_else(|| anyhow::anyhow!("is_left missing"))?;
+        merkle_path_hex.push(sib_hex.to_string());
+        directions.push(if is_left { '0' } else { '1' });
+    }
+
+    // Fetch node root (for verification)
+    let root_resp = reqwest::get(format!("{}/identity/root", node_url.trim_end_matches('/'))).await?;
+    if !root_resp.status().is_success() { anyhow::bail!("root fetch failed: {}", root_resp.status()); }
+    let root_json: serde_json::Value = root_resp.json().await?;
+    let root_hex = root_json.get("root").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("root missing"))?.to_string();
+
+    // Build scope and nullifier
+    let scope = format!("support:{}", proposal_id);
+    let nullifier_hex = compute_scoped_nullifier_hex(&scope, &secret);
+
+    // Private inputs
+    let secret_hex = hex::encode(secret);
+
+    // Prove
+    let (proof_bytes, pub_inputs) = prove_membership_nullifier(data_dir, vk_version, &root_hex, &scope, &nullifier_hex, &leaf_hex, &secret_hex, &merkle_path_hex.iter().map(|s| s.as_str()).collect::<Vec<_>>(), &directions)?;
+    // For transparency, include hex of inputs
+    let public_inputs_hex = pub_inputs.iter().map(|fr| {
+        use ark_ff::{PrimeField, BigInteger};
+        let bytes = fr.into_bigint().to_bytes_be();
+        hex::encode(bytes)
+    }).collect::<Vec<_>>();
+
+    let env = ProofEnvelope {
+        scheme: ProofScheme::Groth16,
+        vk_version,
+        root_hex,
+        scope: scope.clone(),
+        nullifier_hex,
+        proof: proof_bytes,
+        public_inputs: public_inputs_hex,
+    };
+    let payload = AnonymousActionPayload { proof_envelope: env, payload: None };
+
+    // Build tx and submit
+    let mut tx = Transaction::new(
+        TransactionType::AnonymousSupport { proposal_id: uuid::Uuid::parse_str(proposal_id)?, proof: payload },
+        kp.public_key().clone(),
+        kp.sign(b"temp"),
+        0,
+        0,
+    );
+    let sign_msg = format!("TRANSACTION:{}:{}:{}", tx.id, tx.timestamp, tx.data_hash.to_hex());
+    tx.signature = kp.sign(sign_msg.as_bytes());
+
+    let rpc_url = format!("{}/rpc/broadcast_transaction", node_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let response = client.post(&rpc_url).json(&serde_json::json!({"transaction": tx})).send().await?;
+    if response.status().is_success() {
+        let v: serde_json::Value = response.json().await?;
+        println!("{}", serde_json::to_string_pretty(&v)?);
+        Ok(())
+    } else {
+        anyhow::bail!("{}: {}", response.status(), response.text().await?)
+    }
+}
+
+#[cfg(feature = "zkp_groth16")]
+async fn anonymous_vote_real(law_id: &str, key_file: &PathBuf, vc_file: &PathBuf, node_url: &str, data_dir: &str, vk_version: u32) -> Result<()> {
+    use crypto_lib::KeyPair;
+    use common::{Transaction, TransactionType};
+    use common::identity::zkp_prelude::{AnonymousActionPayload, ProofEnvelope, ProofScheme, compute_scoped_nullifier_hex};
+    use crate::zkp::prove_membership_nullifier;
+
+    let priv_hex = std::fs::read_to_string(key_file)?;
+    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
+    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
+    let mut secret = [0u8; 32]; secret.copy_from_slice(&priv_bytes_vec);
+    let kp = KeyPair::from_private_bytes(&secret);
+
+    // Compute commitment hash from VC
+    let vc_json = std::fs::read_to_string(vc_file)?;
+    let vc_value: serde_json::Value = serde_json::from_str(&vc_json)?;
+    let commitment_hash = identity::vc_compute_hash(&vc_value)?;
+    let leaf_hex = commitment_hash.clone();
+
+    // Fetch Merkle proof from node
+    let proof_url = format!("{}/identity/proof/{}", node_url.trim_end_matches('/'), commitment_hash);
+    let proof_resp = reqwest::get(&proof_url).await?;
+    if !proof_resp.status().is_success() { anyhow::bail!("proof fetch failed: {}", proof_resp.status()); }
+    let proof_json: serde_json::Value = proof_resp.json().await?;
+    let path_array = proof_json.get("path").and_then(|v| v.as_array()).ok_or_else(|| anyhow::anyhow!("path missing"))?;
+    let mut merkle_path_hex = Vec::new();
+    let mut directions = String::new();
+    for item in path_array {
+        let sib_hex = item.get(0).and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("sib hex missing"))?;
+        let is_left = item.get(1).and_then(|v| v.as_bool()).ok_or_else(|| anyhow::anyhow!("is_left missing"))?;
+        merkle_path_hex.push(sib_hex.to_string());
+        directions.push(if is_left { '0' } else { '1' });
+    }
+
+    // Fetch node root (for verification)
+    let root_resp = reqwest::get(format!("{}/identity/root", node_url.trim_end_matches('/'))).await?;
+    if !root_resp.status().is_success() { anyhow::bail!("root fetch failed: {}", root_resp.status()); }
+    let root_json: serde_json::Value = root_resp.json().await?;
+    let root_hex = root_json.get("root").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("root missing"))?.to_string();
+
+    // Build scope and nullifier
+    let scope = format!("vote:{}", law_id);
+    let nullifier_hex = compute_scoped_nullifier_hex(&scope, &secret);
+
+    // Private inputs
+    let secret_hex = hex::encode(secret);
+
+    // Prove
+    let (proof_bytes, pub_inputs) = prove_membership_nullifier(data_dir, vk_version, &root_hex, &scope, &nullifier_hex, &leaf_hex, &secret_hex, &merkle_path_hex.iter().map(|s| s.as_str()).collect::<Vec<_>>(), &directions)?;
+    let public_inputs_hex = pub_inputs.iter().map(|fr| {
+        use ark_ff::{PrimeField, BigInteger};
+        let bytes = fr.into_bigint().to_bytes_be();
+        hex::encode(bytes)
+    }).collect::<Vec<_>>();
+
+    let env = ProofEnvelope {
+        scheme: ProofScheme::Groth16,
+        vk_version,
+        root_hex,
+        scope: scope.clone(),
+        nullifier_hex,
+        proof: proof_bytes,
+        public_inputs: public_inputs_hex,
+    };
+    let payload = AnonymousActionPayload { proof_envelope: env, payload: None };
+
+    let mut tx = Transaction::new(
+        TransactionType::AnonymousVote { law_id: uuid::Uuid::parse_str(law_id)?, proof: payload },
+        kp.public_key().clone(),
+        kp.sign(b"temp"),
+        0,
+        0,
+    );
+    let sign_msg = format!("TRANSACTION:{}:{}:{}", tx.id, tx.timestamp, tx.data_hash.to_hex());
+    tx.signature = kp.sign(sign_msg.as_bytes());
+
+    let rpc_url = format!("{}/rpc/broadcast_transaction", node_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let response = client.post(&rpc_url).json(&serde_json::json!({"transaction": tx})).send().await?;
+    if response.status().is_success() {
+        let v: serde_json::Value = response.json().await?;
+        println!("{}", serde_json::to_string_pretty(&v)?);
+        Ok(())
+    } else {
+        anyhow::bail!("{}: {}", response.status(), response.text().await?)
+    }
+}

@@ -16,6 +16,7 @@ uuid = { workspace = true }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = { workspace = true }
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "macros"] }
+hex = { workspace = true }
 
 [features]
 default = []

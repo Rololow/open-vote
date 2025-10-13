@@ -6,72 +6,42 @@ _Auteur:_ Proposition de réorganisation modulaire (wallet + attestations + bloc
 ## 🎯 Objectif Global
 Séparer clairement les responsabilités entre :
 - **Wallet Client** (détention des clés privées / signatures locales)
-- **Government Server** (attestations d'identité eID signées)
 - **API Gateway** (interface publique citoyen & orchestration logique métier)
-- **Blockchain Nodes** (immutabilité, consensus, enregistrement des actes civiques)
-
 Tout en garantissant : sécurité cryptographique, traçabilité, extensibilité, migration incrémentale sans rupture.
 
 ---
 ## 🧩 Composants Cibles
 | Composant | Rôle principal | Ne doit PAS faire | Clé(s) critiques |
-|-----------|----------------|-------------------|------------------|
 | Wallet Client | Générer/tenir la clé privée citoyen, signer identités / votes / soutiens | Stocker la clé privée ailleurs que local | Clé privée citoyen (Ed25519) |
-| Government Server | Vérifier identité eID & émettre attestation signée | Gérer votes ou propositions | Clé de signature attestation |
-| API Gateway | Auth, validation signatures, agrégation propositions/votes | Vérifier documents eID directement | Clé publique gouvernement |
-| Blockchain Nodes | Chaîne d'actes (transactions: identité, proposition, soutien, vote, promotion) | Gérer identité hors chaîne | Clés de nœud / P2P |
-
 ---
-## 🔐 Flux de Confiance & Signatures
 **Attestation identité** (credential signé):
-```jsonc
-{
-  "user_pubkey": "...",
-  "identity_hash": "sha256(...)",
   "issuance_ts": 1234567890,
-  "expiry_ts": 1734567890,
   "version": 1,
   "nonce": "uuid"
 }
-```
 Signature = `Sign(GOV_PRIVATE_KEY, hash(payload_canonique))`  
 Vérifiée par l'API Gateway et potentiellement ancrée sur la blockchain (hash).
 
 Tous les votes / soutiens / propositions sont signés localement par le wallet (jamais la passerelle).
 
----
 ## 🗂️ Réorganisation des Crates
 Nouveaux crates :
 - `government-server/`
-  - `attestation.rs`, `identity_sources/` (`france_connect.rs`, `cni.rs`), `api.rs`, `config.rs`.
 - `wallet-cli/` (ou `wallet-client/`)
   - `commands/`, `keystore.rs`, `attestation_flow.rs`, `signing.rs`, `config.rs`.
 
 Refactors :
 - `api-gateway/` : retirer validation documentaire directe → client HTTP vers government-server. Ajouter `attestations.rs`.
-- `common/` : ajouter `api_types.rs` (types partagés : `AttestationPayload`, `SignedVote`, `ProposalRequest`, etc.).
-
----
 ## 🗃️ Modèle de Données (API Gateway)
 ```sql
 users(
-  id UUID PK,
   public_key BLOB UNIQUE,
   created_at TIMESTAMP,
   status TEXT,                 -- pending|validated|revoked
-  identity_hash TEXT NULL,
-  validated_at TIMESTAMP NULL
 );
 
-identity_attestations(
-  id INTEGER PK,
-  user_id UUID FK,
-  attestation_hash TEXT UNIQUE,
   raw_attestation JSON,
   issued_at TIMESTAMP,
-  expires_at TIMESTAMP NULL,
-  version INTEGER
-);
 
 proposals(
   id INTEGER PK,
@@ -91,14 +61,12 @@ supports(
 );
 
 votes(
-  id INTEGER PK,
   law_id INTEGER FK,
   voter_user_id UUID FK,
   signature BLOB,
   choice TEXT,                 -- yes|no|abstain
   created_at TIMESTAMP
 );
-
 laws(
   id INTEGER PK,
   proposal_id INTEGER FK,
@@ -180,6 +148,10 @@ Détails des Phases :
 | BLOCKCHAIN_ENDPOINT | api-gateway | URL nœud blockchain |
 | WALLET_CONFIG_DIR | wallet-cli | Répertoire config / keystore |
 | PEER_NODES | blockchain-server | Découverte P2P |
+| ISSUER_PUBKEY_EXPORT | blockchain-server | Chemin fichier où exporter la JWK publique (`GET /issuer/jwk`) |
+| ALLOWED_ISSUERS_DIDS | blockchain-server | Liste CSV des DID émetteurs autorisés (ex: `did:key:...,did:key:...`) |
+| MIGRATIONS_DIR | blockchain-server (tests) | Répertoire migrations SQL explicite pour les tests |
+| BLOCKCHAIN_DATA_DIR | blockchain-server | Répertoire des données (contient `commitments.log`) |
 
 ---
 ## 📌 Modifications Code Attendues
@@ -221,6 +193,64 @@ Détails des Phases :
 ---
 ## 📝 Notes
 Cette refonte est conçue pour être incrémentale : chaque phase livre une valeur sans bloquer les suivantes. La priorité initiale reste d'assainir l'état du workspace avant d'ajouter les nouveaux services.
+
+---
+# 🧾 État actuel (Identité & Pré‑ZKP livrés)
+
+Cette section résume ce qui est déjà en place dans le workspace côté identité, engagements et outils de preuves (pré‑ZKP), afin d'aligner l'architecture avec l'état réel du code.
+
+## Endpoints et flux livrés
+- Issuer minimal intégré au nœud (`blockchain-server`):
+  - `GET /issuer/jwk` exporte une JWK publique (kid déterministe), avec option d'export fichier si `ISSUER_PUBKEY_EXPORT` est défini.
+  - `POST /issuer/credential` émet un VC (JSON-LD simplifié), signe avec Ed25519 et retourne le credential signé.
+  - `POST /issuer/verify` vérifie un VC: reconstruction canonique, vérification signature, contrôle `verificationMethod`, allowlist `ALLOWED_ISSUERS_DIDS` et calcule le `commitment_hash` (SHA‑256 du JSON canonique sans `proof`).
+- Pipeline d'engagement d'identité:
+  - Lors de l'émission, insertion idempotente en base (hash d'engagement unique, statut `active`, dates d'émission/expiration, DIDs issuer/subject).
+  - Au démarrage, le nœud hydrate en mémoire les engagements actifs depuis la DB et, si besoin, rétro-remplit `commitments.log`.
+  - À la soumission/minage de transactions, `identity_ref` est validé (présence DB, statut `active`, non expiré, issuer autorisé) et les TX invalides sont filtrées avant minage.
+
+## Fichier commitments.log et Merkle root/proofs
+- Fichier append-only `commitments.log` (une ligne hex SHA‑256 par engagement), situé dans `${BLOCKCHAIN_DATA_DIR}/commitments.log` (par défaut `./data/commitments.log`).
+- CLI `compute_root` (binaire du crate `blockchain-server`): calcule la racine de Merkle à partir du fichier.
+- CLI `commitment_proof` (binaire):
+  - `root` → imprime la racine hex;
+  - `prove <index>` → génère une preuve JSON (siblings hex, `leaf_index`);
+  - `verify <index> <proof.json>` → vérifie la preuve et affiche `valid=true|false`.
+- Bibliothèque pré‑ZKP dans `common::identity::zkp_prelude`:
+  - `IdentityAccumulator` (trait minimal), `MerkleAccumulator` (duplication du dernier nœud pour paires impaires), `MerkleProof`, `merkle_proof_for`, `verify_merkle_proof`.
+
+## Outils complémentaires
+- `issuer_key_tool` (binaire): génération/import/export de clé issuer Ed25519 avec `kid` déterministe et DID `did:key` dérivé; testé via import/round‑trip.
+- `wallet-cli` (MVP): commandes VC (récupération, calcul de hash d’engagement, vérification facultative via `/issuer/verify`, publication côté nœud).
+
+## Tests, benchs et garde‑fous
+- Tests d’API issuer (`/issuer/verify`) positifs/négatifs, et E2E idempotence d’engagement côté nœud.
+- Tests d’audit de confidentialité: pas de logs de données sensibles, pas de stockage de clé privée serveur.
+- Intégration Merkle: parsing hex compatible `commitments.log`, génération et vérification de preuves contre la racine.
+- Bench performance (Criterion) sur la vérification de VC (Partie 7.7).
+
+## Documentation
+- Diagramme identité et flux: `docs/identity_diagram.md`.
+- Détails des preuves Merkle et de l’outil: `docs/merkle_proofs.md` (lié depuis le README).
+- Aide au dépannage identité: `docs/troubleshooting_identity.md`.
+
+### Essayer rapidement (preuves Merkle) 🧪
+Préparez un fichier `commitments.log` actuel (le nœud le crée/alimente dans `./data/commitments.log`).
+
+```powershell
+# 1) Calculer la racine de Merkle du fichier courant
+cargo run -p blockchain-server --bin compute_root -- ./data/commitments.log
+
+# 2) Générer une preuve pour la feuille d'index 0 (adapter l'index selon votre fichier)
+cargo run -p blockchain-server --bin commitment_proof -- ./data/commitments.log prove 0 > proof.json
+
+# 3) Vérifier la preuve générée
+cargo run -p blockchain-server --bin commitment_proof -- ./data/commitments.log verify 0 proof.json
+```
+
+Pour une description complète des formats, limitations (duplication du dernier nœud sur niveaux impairs) et API librairie, voir `docs/merkle_proofs.md`.
+
+Voir aussi dans le README la section « Outils CLI (Merkle) » pour un aperçu des deux binaires: `compute_root` et `commitment_proof`.
 
 ---
 # Pistes de Refonte de l'Architecture pour une Décentralisation et une Sécurité Accrues
@@ -421,3 +451,89 @@ Voici un plan d'action concret en trois phases.
     *   **Côté `blockchain-server` :** Ajouter la capacité de vérifier cette preuve lors de la validation de la transaction. La transaction de vote ne contiendra plus que la preuve et le choix, la rendant anonyme.
 
 **Résultat de la Phase 3 :** Le système garantit un anonymat fort pour les actions les plus sensibles, atteignant le plus haut niveau de sécurité et de respect de la vie privée envisagé par la nouvelle architecture.
+
+---
+
+## 🔎 Analyse de viabilité cryptographique, risques et méthodes proposées
+
+Cette section regroupe une analyse de viabilité du sous-système cryptographique (attestations, commitments, ZKP) et propose plusieurs méthodes concrètes pour gérer les identités de façon décentralisée tout en préservant la vie privée.
+
+### Synthèse exécutive — viabilité
+- Le projet est viable et déjà bien avancé : gestion des VCs/DID, `commitments.log`, Merkle roots, et un prototype ZKP (Groth16 + Poseidon) sont présents.
+- Points à surveiller avant un déploiement large : gestion du "trusted setup" (Groth16), synchronisation des fichiers Poseidon/VK entre wallet et nœud, performances de génération de preuve côté client, mécanismes de révocation.
+
+### Points forts cryptographiques
+- Signatures Ed25519 pour VC/attestations : robustes et standards.
+- Canonisation JSON + SHA‑256 pour commitments : simple et reproductible.
+- Utilisation de Poseidon pour circuits SNARK‑friendly.
+
+### Risques et limites
+1. Trusted setup (Groth16) — nécessité d'une cérémonie ou migration vers un schéma sans trusted setup.
+2. Synchronisation des artefacts (Poseidon params, PK/VK) entre wallet et node — source fréquente d'échecs de vérification.
+3. Temps/mémoire de génération de preuve sur clients mobiles (bench requis).
+4. Revocation / suppression d'un engagement (append‑only `commitments.log` nécessite stratégie de révocation).
+5. Point d'autorité sur l'émetteur (Government Server) — modèle hybride à clarifier.
+
+### Recommandations techniques immédiates
+- Automatiser la vérification d'intégrité des artefacts ZKP (hashes VK et Poseidon) et échouer si mismatch.
+- Documenter et, si possible, organiser une cérémonie multi‑parties (Powers‑of‑Tau) pour le trusted setup ou évaluer PLONK/Halo2 pour réduire ce risque.
+- Mesurer la performance de proof generation via `zkp_bench` sur plateformes représentatives (desktop / Android / iOS).
+- Implémenter un mécanisme de révocation (revocation list, accumulator, ou marqueur d'invalidité en chaîne) et des tests E2E associés.
+
+### Méthodes proposées pour la gestion décentralisée des identités (5 options)
+
+Méthode A — Flow actuel (commitment + issuer atteste + Merkle root + ZKP membership)
+- Contrat : VC signé → wallet calcule commitment → append au `commitments.log` → preuve ZK (membership + nullifier) pour actions.
+- Avantages : déjà implémenté; bon compromis vie privée/praticabilité.
+- Inconvénients : trusted setup (Groth16), synchronisation params, révocation complexe.
+
+Méthode B — DID + Verifiable Credentials off‑chain + on‑chain minimal reference
+- Contrat : VC W3C stocké off‑chain, on‑chain seulement le hash (commitment) et métadonnées minimales.
+- Avantages : interopérabilité, faibles fuites d'information on‑chain.
+- Inconvénients : revocation et vérification dépendent d'un registre/endpoint off‑chain.
+
+Méthode C — Pairwise / per‑service pseudonymous DIDs + selective disclosure
+- Contrat : Wallet dérive DID par service (HKDF/domaine), réduit linkability cross‑service; combine avec disclosure sélectif ou ZK.
+- Avantages : limite traçage entre services.
+- Inconvénients : gestion des seeds/backup, menace d'analyse de métadonnées.
+
+Méthode D — Anonymous credentials (BBS+ / CL‑signatures) + revocation accumulator
+- Contrat : Emission aveugle de crédentiels anonymes; wallet prouve possession/selective disclosure sans révéler identité.
+- Avantages : forte confidentialité, pas de linkage entre présentations.
+- Inconvénients : complexité d'implémentation, nécessité d'un système de révocation et de mises à jour d'accumulateur.
+
+Méthode E — Décentraliser l'émission (multi‑issuer / threshold attestation)
+- Contrat : attestations émises/validées par un quorum d'émetteurs (threshold signatures / multi‑sig) ; registre public des émetteurs.
+- Avantages : pas de single point of failure, résilience politique et opérationnelle.
+- Inconvénients : coordination entre autorités, UX plus lourde.
+
+### Checklist opérationnelle (tests prioritaires)
+1. Exécuter `zkp_bench` sur plateformes cibles et collecter latence/memoire.
+2. Automatiser vérification de hash (Poseidon/VK) au boot wallet/server.
+3. Planifier et documenter ceremony de setup ou évaluer alternative (PLONK/Halo2).
+4. Conception et test d'un flux de révocation (E2E).
+5. Rédiger model de menace et PIA (privacy impact assessment).
+
+### Recommandations d'implémentation graduelle
+- Si priorité = privacy forte : viser Méthode D (anonymous credentials) couplée à ZKP pour actions sensibles.
+- Si priorité = pragmatique / low‑effort : conserver Méthode A et durcir ops (ceremony, sync automatisée, révocation simple).
+- Si priorité = gouvernance et décentralisation : ajouter Méthode E (threshold issuers) et registre d'émetteurs sur chaîne.
+
+### Prochaines actions que je peux implémenter / livrables
+1. Ajouter un script PowerShell/CLI qui vérifie automatiquement que `poseidon_params.bin` et `vk‑*.bin` ont des hashes identiques entre wallet et server (PR automatique).
+2. Lancer des benchs `zkp_bench` (je peux les exécuter ici si tu me fournis exemples de fichiers PK/VK/params ou m'autorises à générer des paramètres temporaires).
+3. Rédiger un document comparatif Groth16 vs PLONK/Halo2 (trusted setup, proof size, temps proving/verif, maturité libs Rust).
+
+---
+
+## ✅ Résumé et décision attendue
+Tu peux choisir la voie que tu souhaites prioriser :
+- "Pragmatique" : stabiliser le flow actuel (A) + automations/ceremony.
+- "Privacy‑max" : investir sur anonymous credentials (D) + revocation.
+- "Décentralisation organisationnelle" : mettre en place multi‑issuer threshold (E).
+
+Indique quelle option tu veux prioriser et je peux : (1) ouvrir une PR qui ajoute le script de vérification des paramètres, (2) lancer des benchs, ou (3) rédiger le plan de migration technique détaillé pour l'option choisie.
+
+---
+
+_Fin de l'ajout — analyse de viabilité, options et plan d'action intégrés._

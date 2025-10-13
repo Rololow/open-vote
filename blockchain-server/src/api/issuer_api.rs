@@ -34,11 +34,27 @@ async fn get_jwk(State(_node): State<AppState>) -> Json<JwkExportStub> {
     let pub_bytes = kp.public_key.to_bytes();
     let issuer_did = derive_did_key_ed25519(&pub_bytes);
     let x_b64 = URL_SAFE_NO_PAD.encode(pub_bytes);
+    // Derive a deterministic kid (key id) from the public key (first 16 hex chars)
+    let pub_hex = hex::encode(pub_bytes);
+    let kid = format!("ed25519-{}", &pub_hex[..16]);
+    // Optionally export public JWK to a file if ISSUER_PUBKEY_EXPORT is set
+    if let Ok(path) = std::env::var("ISSUER_PUBKEY_EXPORT") {
+        let jwk_json = serde_json::json!({
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": x_b64,
+            "kid": kid,
+            "issuer_did": issuer_did,
+        });
+        if let Err(e) = std::fs::write(&path, serde_json::to_string_pretty(&jwk_json).unwrap_or_else(|_| "{}".into())) {
+            tracing::warn!("Impossible d'exporter le JWK public vers {}: {}", path, e);
+        }
+    }
     Json(JwkExportStub {
         kty: "OKP",
         crv: "Ed25519",
         x: x_b64,
-        kid: "issuer-key-1".to_string(),
+        kid,
         issuer_did,
         note: "Stub JWK export – structure minimale (Phase 2 WIP)",
     })

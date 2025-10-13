@@ -2,7 +2,6 @@ use axum::{extract::State, response::Json, http::StatusCode};
 use serde_json;
 use common::{Block, Transaction};
 use super::super::{AppState, types::*};
-use tracing::info;
 
 /// Peers: list
 pub async fn get_peers_handler(State(node): State<AppState>) -> Json<serde_json::Value> {

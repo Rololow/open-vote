@@ -5,7 +5,9 @@ use anyhow::{Result, Context};
 use uuid::Uuid;
 use tracing::info;
 
-/// Configuration du serveur blockchain
+/// Server configuration for a blockchain node.
+///
+/// Loads defaults, environment variables and optional JSON config file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub node_id: String,
@@ -19,7 +21,7 @@ pub struct ServerConfig {
     pub max_block_size: usize,
     pub enable_mining: bool,
     pub log_level: String,
-    /// Liste des DID émetteurs autorisés (did:key:...), séparés par des virgules
+    /// List of allowed issuer DIDs (did:key:...), used by identity checks.
     #[serde(default)]
     pub allowed_issuers_dids: Vec<String>,
 }
@@ -46,11 +48,11 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
-    /// Charge la configuration depuis l'environnement et les fichiers
+    /// Load the configuration from environment variables and optional files.
     pub async fn load() -> Result<Self> {
         let mut config = Self::default();
 
-        // Charger depuis les variables d'environnement
+    // Load from environment variables
         if let Ok(node_id) = env::var("BLOCKCHAIN_NODE_ID") {
             config.node_id = node_id;
         }
@@ -73,7 +75,12 @@ impl ServerConfig {
             config.database_url = db_url;
         }
 
-        if let Ok(data_dir) = env::var("BLOCKCHAIN_DATA_DIR") {
+    // Support both BLOCKCHAIN_DATA_DIRECTORY (script uses this) and the older
+    // BLOCKCHAIN_DATA_DIR env var for backward compatibility. Prefer the
+    // more explicit BLOCKCHAIN_DATA_DIRECTORY when present.
+        if let Ok(data_dir) = env::var("BLOCKCHAIN_DATA_DIRECTORY") {
+            config.data_directory = data_dir;
+        } else if let Ok(data_dir) = env::var("BLOCKCHAIN_DATA_DIR") {
             config.data_directory = data_dir;
         }
 
@@ -92,7 +99,7 @@ impl ServerConfig {
             config.allowed_issuers_dids = items;
         }
 
-        // Charger depuis le fichier de configuration si il existe
+    // Load from a configuration file if present
         let config_path = Path::new("blockchain-config.json");
         if config_path.exists() {
             let config_content = tokio::fs::read_to_string(config_path).await
@@ -105,35 +112,35 @@ impl ServerConfig {
             config = file_config;
         }
 
-        // Créer le répertoire de données si nécessaire
+        // Create the data directory if necessary
         tokio::fs::create_dir_all(&config.data_directory).await
             .context("Erreur création répertoire de données")?;
 
         Ok(config)
     }
 
-    /// Charge la configuration depuis un fichier spécifique
+    /// Load configuration from a specific JSON file.
     pub async fn load_from_file(path: &str) -> Result<Self> {
-        info!("🔧 Chargement de la configuration depuis: {}", path);
+        info!("Loading configuration from: {}", path);
         
         let config_content = tokio::fs::read_to_string(path).await
             .context("Erreur lecture fichier de configuration")?;
         
-        info!("📄 Contenu du fichier de configuration:");
-        info!("{}", config_content);
+    info!("Config file contents:");
+    info!("{}", config_content);
         
         let config: ServerConfig = serde_json::from_str(&config_content)
             .context("Erreur parsing configuration JSON")?;
         
-        info!("✅ Configuration parsée avec succès:");
-        info!("   🆔 Node ID: {}", config.node_id);
-        info!("   🌐 Bind address: {}", config.bind_address);
-        info!("   🔌 API port: {}", config.api_port);
-        info!("   🔗 P2P port: {}", config.p2p_port);
-        info!("   💾 Database URL: {}", config.database_url);
-        info!("   📁 Data directory: {}", config.data_directory);
+    info!("Configuration parsed successfully:");
+    info!("   Node ID: {}", config.node_id);
+    info!("   Bind address: {}", config.bind_address);
+    info!("   API port: {}", config.api_port);
+    info!("   P2P port: {}", config.p2p_port);
+    info!("   Database URL: {}", config.database_url);
+    info!("   Data directory: {}", config.data_directory);
         
-        // Créer le répertoire de données si nécessaire
+        // Create the data directory if necessary
         tokio::fs::create_dir_all(&config.data_directory).await
             .context("Erreur création répertoire de données")?;
         
@@ -142,23 +149,23 @@ impl ServerConfig {
         Ok(config)
     }
 
-    /// Sauvegarde la configuration dans un fichier
+    /// Save the configuration to a JSON file.
     pub async fn save(&self, path: &str) -> Result<()> {
         let config_json = serde_json::to_string_pretty(self)
-            .context("Erreur sérialisation configuration")?;
-        
+            .context("Error serializing configuration")?;
+
         tokio::fs::write(path, config_json).await
-            .context("Erreur écriture fichier de configuration")?;
-        
+            .context("Error writing configuration file")?;
+
         Ok(())
     }
 
-    /// Obtient l'URL complète de l'API
+    /// Return the full API URL.
     pub fn api_url(&self) -> String {
         format!("http://{}:{}", self.bind_address, self.api_port)
     }
 
-    /// Obtient l'adresse P2P
+    /// Return the P2P address (host:port).
     pub fn p2p_address(&self) -> String {
         format!("{}:{}", self.bind_address, self.p2p_port)
     }

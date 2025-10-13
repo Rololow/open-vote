@@ -162,6 +162,74 @@ La nouvelle architecture sépare clairement la détention des clés (client) de 
 - Implémentation ZK-SNARKs/STARKs pour votes anonymes
 - Protection de la vie privée tout en maintenant la vérifiabilité
 
+## Phase 3 — Zero‑Knowledge Proofs (ZKP)
+
+This project now includes an end-to-end ZKP design (Phase 3) where the Wallet generates a SNARK proof that proves:
+- membership in a Merkle commitment set (Merkle root) and
+- a scoped nullifier computed from a per-scope secret (so the same secret cannot be reused across scopes).
+
+High-level notes
+- Curve / SNARK: BN254 + Groth16 (arkworks). The implementation uses a Poseidon-based circuit for SNARK‑friendly hashing.
+- Persistent artifacts (shared between wallet and node): Poseidon params and Groth16 keys are written to the node's data directory under `zkp/`.
+
+Files and locations
+- Poseidon parameters: `<data_dir>/zkp/poseidon_params.bin`
+- Verifying key (node expects): `<data_dir>/zkp/vk-groth16-v{version}.bin`
+- Proving key (wallet): `<data_dir>/zkp/pk-groth16-v{version}.bin`
+
+Wallet: creating a proof
+- The wallet CLI can generate Poseidon parameters, perform Groth16 setup (pk/vk) and produce a proof (binary) together with a small JSON envelope containing the public inputs.
+- Public input ordering in the circuit: `[root, nullifier, scope_hash]` — the node verification expects the same order.
+
+Node: verification endpoint
+- The blockchain server exposes a verification endpoint that consumes the JSON envelope (or inline proof) and verifies the proof against the persisted verifying key:
+
+- POST /api/identity/verify_zkp
+  - JSON body fields (either provide `proof` as hex/base64 or `proof_file` pointing to an uploaded binary):
+    - `vk_version`: integer (selects `vk-groth16-v{vk_version}.bin` stored under `<data_dir>/zkp/`)
+    - `public_inputs`: array of hex strings (32-byte big-endian hex) in the order `[root, nullifier, scope_hash]`
+    - `proof`: hex or base64-encoded proof bytes (optional if `proof_file` is provided)
+
+Example JSON (POST body):
+
+```json
+{
+  "vk_version": 1,
+  "public_inputs": ["<root_hex>", "<nullifier_hex>", "<scope_hex>"],
+  "proof": "<proof_hex_or_base64>"
+}
+```
+
+Quick curl example (replace placeholders):
+
+```powershell
+# Example: POST proof as inline hex/base64 JSON
+curl -X POST http://localhost:3000/api/identity/verify_zkp \
+  -H "Content-Type: application/json" \
+  -d '{ "vk_version": 1, "public_inputs": ["<root_hex>", "<null_hex>", "<scope_hex>"], "proof": "<proof_hex>" }'
+```
+
+### Operator guide (quick)
+
+For operators and CI: a short automation + diagnostics guide lives in `docs/zkp_run.md`. It shows the exact PowerShell script used for the end-to-end automation, how to persist artifacts via `BLOCKCHAIN_DATA_DIRECTORY`, and which `errors.log` entries to inspect when verification fails.
+
+Quick command (PowerShell):
+
+```powershell
+pwsh -File .\scripts\zkp_flow_with_clean_log.ps1
+```
+
+See `docs/zkp_run.md` for CI recommendations and troubleshooting tips.
+
+Build / feature notes
+- The ZKP code is feature-gated in the crates (feature name used in workspace: `zkp_groth16`). When building locally enable that feature for the `wallet-cli` and `blockchain-server` crates if you want the ZKP code paths compiled.
+
+Troubleshooting
+- If verification fails: ensure the wallet and node use the same Poseidon parameters and the same `vk_version` (matching VK/PK pair). The public inputs order must match the circuit's expectation: `[root, nullifier, scope_hash]`.
+- The project includes gated diagnostic helpers (compile with feature `zkp_debug`) that synthesize the circuit and print constraint statistics to help debug unsatisfied constraints or public‑input ordering issues.
+
+If you'd like, I can also add a compact example script under `scripts/` demonstrating: (1) setup (generate params & keys), (2) wallet proof generation, and (3) POSTing the proof to the node. Reply with which variant you prefer (PowerShell or POSIX shell) and I'll add it.
+
 L'ancienne interface Web (Yew) reste disponible pour tests mais sera progressivement remplacée par le Wallet CLI et une future interface graphique.
 
 
@@ -322,6 +390,17 @@ Le système supporte plusieurs configurations de déploiement:
 - `BLOCKCHAIN_SECURITY.md` - Mesures de sécurité blockchain
 - `DOCKER_DEPLOYMENT.md` - Guide de déploiement avec Docker
 - `IMPLEMENTATION_REPORT.md` - Rapport technique d'implémentation
+ - `docs/identity_diagram.md` - Diagramme du flux identité (Mermaid)
+ - `docs/troubleshooting_identity.md` - Guide de dépannage identité (DID/VC)
+ - `docs/examples/vc_citizen.json` - Exemple de VC minimal
+ - `docs/merkle_proofs.md` - Preuves de Merkle (racine, génération et vérification de preuves)
+ - `docs/merkle_proofs.md` - Merkle root/proofs CLI et API (préparation ZKP)
+
+### Outils CLI (Merkle) 
+- `compute_root` (crate `blockchain-server`) calcule la racine Merkle d’un `commitments.log`.
+- `commitment_proof` (crate `blockchain-server`) génère et vérifie des preuves pour un index donné.
+
+Voir `docs/merkle_proofs.md` pour les détails de format et l’API, et le paragraphe « Essayer rapidement (preuves Merkle) » dans `ARCHITECTURE_REDESIGN.md` pour des commandes PowerShell prêtes à l’emploi.
 
 ## 🤝 Contribution
 
@@ -331,7 +410,36 @@ Ce projet est en développement actif. Consultez la roadmap pour les prochaines 
 
 MIT OR Apache-2.0
 
----
+# ⚡️ ZKP Poseidon Parameters Synchronization
+
+To ensure successful proof verification, both wallet-cli and blockchain-server must use the exact same Poseidon parameters file.
+
+**Poseidon parameters file location:**
+- `<data_dir>/zkp/poseidon_params.bin`
+
+**How to synchronize:**
+1. Generate Poseidon parameters once using wallet-cli or server setup.
+2. Copy the resulting `poseidon_params.bin` file to both the wallet-cli and server data directories (overwrite any existing file).
+3. Confirm the hashes match by running your workflow and checking `errors.log` for:
+  - `Poseidon params hash (cli): ...`
+  - `Poseidon params hash (serveur): ...`
+  - These hashes must be identical for proof verification to succeed.
+
+**Example parameters (BN254, Groth16, recommended for this project):**
+- Curve: BN254
+- Hash: Poseidon
+- Full rounds: 8
+- Partial rounds: 57
+- Rate: 2
+- Capacity: 1
+- Alpha: 5
+- MDS: 3x3 matrix (see generated file)
+- Ark: 65x3 matrix (see generated file)
+
+**Do not modify Poseidon parameters independently on wallet or server. Always use a single, shared file.**
+
+If you regenerate parameters, repeat the copy step to keep both sides in sync.
+
 
 ## ⚙️ Détails d’exécution (compose)
 
@@ -473,3 +581,82 @@ Requête GET JSON attendue:
 - Contrôle des émetteurs: `ALLOWED_ISSUERS_DIDS` accepte une liste de DID (séparateur virgule). Vide (`""`) = autoriser tous (mode dev).
 - Si le GET renvoie 404, laissez le `vc-commit` faire un POST d’auto‑enregistrement (comportement par défaut si la lecture échoue).
 - Sous Windows/OneDrive, privilégiez des chemins sans espaces pour éviter des surprises de quoting.
+
+## 🔑 Gestion de la clé d'Issuer (offline)
+
+Un outil en ligne de commande est fourni pour gérer la clé Ed25519 de l'émetteur (issuer) et exporter la JWK publique.
+
+- Binaire: `issuer_key_tool` (dans `blockchain-server`)
+- Fichier clé par défaut: `issuer_ed25519_key.json` (modifiable via `ISSUER_KEY_PATH`)
+- Variables d'environnement utiles:
+  - `ISSUER_KEY_PATH`: chemin du fichier clé issuer (défaut: `issuer_ed25519_key.json`)
+  - `ISSUER_VC_VALIDITY_DAYS`: durée de validité des VC émis (jours)
+  - `ISSUER_PUBKEY_EXPORT`: si défini (chemin), l'API `/issuer/jwk` peut aussi écrire la JWK publique côté serveur
+
+Exemples d’utilisation:
+
+```powershell
+# Créer/charger la clé et afficher le DID émetteur
+cargo run -p blockchain-server --bin issuer_key_tool
+
+# Spécifier un chemin de clé et exporter la JWK publique
+cargo run -p blockchain-server --bin issuer_key_tool -- `
+  --key issuer_ed25519_key.json `
+  --export-jwk issuer_pub.jwk
+
+# Importer une clé privée Ed25519 (32 octets hex) puis exporter la JWK
+cargo run -p blockchain-server --bin issuer_key_tool -- `
+  --key issuer_ed25519_key.json `
+  --import-private-hex 00112233...ffeeddcc00112233...ffeeddcc `
+  --export-jwk issuer_pub.jwk
+```
+
+```bash
+# Linux/macOS
+cargo run -p blockchain-server --bin issuer_key_tool -- \
+  --key issuer_ed25519_key.json \
+  --export-jwk issuer_pub.jwk
+```
+
+Notes sécurité:
+- L’outil n’imprime jamais la clé privée. Conservez `issuer_ed25519_key.json` dans un répertoire protégé.
+- La rotation de clé est facilitée par un `kid` déterministe dérivé de la clé publique (préfixe hex). Documentez la co‑existence des anciennes clés si des VC non expirés circulent encore.
+
+## 🌳 Outil Merkle root (commitments)
+
+Un utilitaire CLI est fourni pour calculer la racine de Merkle à partir d'une liste de hachés d'engagements (un hash hexadécimal de 32 octets par ligne).
+
+- Binaire: `compute_root` (inclus dans `blockchain-server`)
+- Fichier d'entrée par défaut: `<repo>/blockchain-server/data/commitments.log`
+- Sortie: affiche `merkle_root=<hex>` sur la sortie standard; option `--out <path>` pour écrire la racine en hex dans un fichier.
+
+Utilisation:
+
+- `compute_root [<commitments.log>] [--out <path>]`
+- Options:
+  - `-h, --help`: afficher l'aide et quitter
+  - `--out <path>`: écrire la racine calculée dans un fichier en plus de l'afficher
+
+Contraintes d'entrée: chaque ligne non vide doit être un hash hex de 32 octets (64 caractères hex). Si le nombre de feuilles est impair, la dernière est dupliquée pour le calcul du niveau (comportement standard Merkle).
+
+### Format du journal `commitments.log`
+- Emplacement par défaut: `blockchain-server/data/commitments.log`
+- Format: une ligne par engagement (commitment), chaque ligne contient un hash SHA‑256 encodé en hex (64 caractères).
+- Append‑only: de nouvelles lignes sont ajoutées à chaque engagement `active`. Les révocations/expirations sont gérées côté base/état, le log reste historique.
+- Outils associés:
+  - `compute_root`: calcule une racine de Merkle reproductible
+  - `scripts/compute_commitments_root.ps1`: snapshot quotidien (Windows)
+
+## 🧪 CI / Parité Linux
+
+Un script bash minimal est fourni pour CI Linux afin de vérifier le flux identité et lancer les tests.
+
+```bash
+./scripts/identity_flow.sh --key issuer_ed25519_key.json --export-jwk issuer_pub.jwk
+# Options: --no-cargo pour réutiliser des binaires déjà construits
+```
+
+Ce script:
+- Construit `issuer_key_tool` (sauf `--no-cargo`)
+- S’assure de la présence d’une clé issuer et, si demandé, exporte la JWK publique
+- Exécute `cargo test --workspace`

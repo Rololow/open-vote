@@ -16,6 +16,7 @@ hex = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+bs58 = "0.4"
 
 [features]
 # Feature "identity" active les structures DID / VC expérimentales.
@@ -38,3 +39,8 @@ optional = true
 [[bench]]
 name = "identity_hash"
 harness = false
+
+[[bench]]
+name = "verify_vc"
+harness = false
+required-features = ["identity"]

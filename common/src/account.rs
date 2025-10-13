@@ -56,7 +56,7 @@ impl Account {
     }
     
     /// Vérifie si le compte peut voter sur un sujet donné
-    pub fn can_vote_on_topic(&self, topic: &str) -> bool {
+    pub fn can_vote_on_topic(&self, _topic: &str) -> bool {
         if !self.is_active {
             return false;
         }

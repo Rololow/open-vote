@@ -1,3 +1,4 @@
+use ark_ff::PrimeField;
 use axum::{Router, routing::{get, post}};
 use super::handlers::*;
 use axum::extract::Path;
@@ -5,7 +6,10 @@ use axum::Json;
 use axum::http::StatusCode;
 use std::sync::Arc;
 use crate::node::BlockchainNode;
+use crate::identity_root::{compute_latest_root_from_file, commitments_log_path, read_last_root_anchors};
 use chrono::{DateTime, Utc};
+use axum::extract::Query;
+use serde::Deserialize;
 
 /// Create API routes (blockchain operations, accounts, etc.)
 pub fn create_api_routes() -> Router<super::AppState> {
@@ -32,6 +36,10 @@ pub fn create_api_routes() -> Router<super::AppState> {
         .route("/identity/:account_id/status", get(identity_status_simple_handler))
     // Identity commitments: public read by hash
     .route("/identity/commitments/:hash", get(get_identity_commitment_by_hash))
+    .route("/identity/root", get(get_identity_root_handler))
+    .route("/identity/roots", get(get_identity_roots_handler))
+    .route("/identity/proof/:commitment_hex", get(get_identity_proof_handler))
+    .route("/identity/verify_zkp", post(verify_zkp_handler))
     .route("/identity/commit", post(post_identity_commit))
         
         // Crypto routes (migrated from api-gateway)
@@ -226,4 +234,198 @@ async fn post_identity_commit(
     }
 
     Ok(Json(CommitResponse { commitment_hash, did: subject_did, issuer_did, id, existed }))
+}
+
+// GET /identity/root: return latest Merkle root and leaf count from commitments.log
+async fn get_identity_root_handler(
+    axum::extract::State(node): axum::extract::State<Arc<BlockchainNode>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let path = commitments_log_path(&node.config.data_directory);
+    let (root, leaves) = compute_latest_root_from_file(&path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("compute root: {e}")))?;
+    let root_hex = hex::encode(root);
+    Ok(Json(serde_json::json!({
+        "root": root_hex,
+        "leaves": leaves,
+        "path": path.to_string_lossy(),
+    })))
+}
+
+#[derive(Deserialize)]
+struct RootsQuery { limit: Option<usize> }
+
+// GET /identity/roots?limit=N: return latest N anchored roots from identity_roots.jsonl
+async fn get_identity_roots_handler(
+    axum::extract::State(node): axum::extract::State<Arc<BlockchainNode>>,
+    Query(q): Query<RootsQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let limit = q.limit.unwrap_or(10).min(1000);
+    let entries = read_last_root_anchors(&node.config.data_directory, limit)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("read anchors: {e}")))?;
+    Ok(Json(serde_json::json!({
+        "count": entries.len(),
+        "entries": entries,
+        "limit": limit,
+    })))
+}
+
+// GET /identity/proof/{commitment_hex}: return Merkle inclusion proof for the given commitment
+async fn get_identity_proof_handler(
+    axum::extract::State(node): axum::extract::State<Arc<BlockchainNode>>,
+    Path(commitment_hex): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Decode the commitment hex
+    let commitment_bytes = hex::decode(&commitment_hex)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid hex: {e}")))?;
+    if commitment_bytes.len() != 32 {
+        return Err((StatusCode::BAD_REQUEST, "commitment must be 32 bytes".into()));
+    }
+    let mut commitment = [0u8; 32];
+    commitment.copy_from_slice(&commitment_bytes);
+
+    // Read all commitments from file
+    let path = commitments_log_path(&node.config.data_directory);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err((StatusCode::NOT_FOUND, "no commitments found".into()));
+        }
+        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("read commitments: {e}"))),
+    };
+
+    let mut leaves: Vec<common::identity::zkp_prelude::Commitment> = Vec::new();
+    for (idx, line) in content.lines().enumerate() {
+        let t = line.trim();
+        if t.is_empty() { continue; }
+        let bytes = hex::decode(t)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("invalid hex at line {}: {e}", idx + 1)))?;
+        if bytes.len() != 32 {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("invalid commitment length at line {}", idx + 1)));
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        leaves.push(arr);
+    }
+
+    // Find the index of the target commitment
+    let target_index = leaves.iter().position(|&c| c == commitment)
+        .ok_or((StatusCode::NOT_FOUND, "commitment not found in current set".into()))?;
+
+    // Generate the Merkle proof
+    let proof = common::identity::zkp_prelude::merkle_proof_for(&leaves, target_index)
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "failed to generate proof".into()))?;
+
+    // Convert to the format needed for ZKP: Vec<(sibling_hex, is_left)>
+    let mut path = Vec::new();
+    let mut idx = proof.leaf_index;
+    for sib in &proof.siblings {
+        let is_left = idx % 2 == 0; // if even index, current is left, sibling is right
+        path.push((hex::encode(sib), is_left));
+        idx /= 2;
+    }
+
+    // Also return the root for verification
+    let mut acc = common::identity::zkp_prelude::MerkleAccumulator::new();
+    for l in &leaves {
+        common::identity::zkp_prelude::IdentityAccumulator::append(&mut acc, *l)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("append leaf: {e}")))?;
+    }
+    let root = common::identity::zkp_prelude::IdentityAccumulator::root(&acc);
+
+    Ok(Json(serde_json::json!({
+        "commitment": commitment_hex,
+        "leaf_index": proof.leaf_index,
+        "root": hex::encode(root),
+        "path": path, // Vec<(sibling_hex, is_left)>
+    })))
+}
+
+// POST /identity/verify_zkp: verify a Groth16 proof envelope produced by the wallet-cli ZkpProve
+#[derive(serde::Deserialize)]
+struct ZkpVerifyRequest {
+    /// either a path to a binary proof file (proof_file) or a hex/base64 string in `proof`
+    proof_file: Option<String>,
+    proof: Option<String>,
+    /// vk version to use
+    vk_version: u32,
+    /// public inputs as array of 32-byte hex strings in the same order the circuit expects
+    public_inputs: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ZkpVerifyResponse {
+    ok: bool,
+    message: String,
+}
+
+async fn verify_zkp_handler(
+    axum::extract::State(node): axum::extract::State<Arc<BlockchainNode>>,
+    Json(req): Json<ZkpVerifyRequest>,
+) -> Result<Json<ZkpVerifyResponse>, (StatusCode, String)> {
+    #[cfg(not(feature = "zkp_groth16"))]
+    {
+        return Err((StatusCode::NOT_IMPLEMENTED, "zkp_groth16 feature not enabled on node".into()));
+    }
+
+    #[cfg(feature = "zkp_groth16")]
+    {
+        use crate::zkp_verifier::{verify_groth16_bn254, fr_from_be_bytes};
+        use ark_bn254::Fr;
+
+        // Load proof bytes: prefer proof_file if provided
+        let proof_bytes: Vec<u8> = if let Some(pf) = req.proof_file.as_ref() {
+            // If pf looks like a path and file exists, read it
+            if std::path::Path::new(pf).exists() {
+                std::fs::read(pf).map_err(|e| (StatusCode::BAD_REQUEST, format!("read proof_file: {e}")))?
+            } else {
+                return Err((StatusCode::BAD_REQUEST, "proof_file path does not exist".into()));
+            }
+        } else if let Some(proof_str) = req.proof.as_ref() {
+            // Try hex then base64
+            if let Ok(b) = hex::decode(proof_str) { b }
+            else if let Ok(b) = base64::decode(proof_str) { b }
+            else { return Err((StatusCode::BAD_REQUEST, "proof must be hex or base64".into())); }
+        } else {
+            return Err((StatusCode::BAD_REQUEST, "missing proof_file or proof".into()));
+        };
+
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use ark_ff::BigInteger;
+        let mut log_file = OpenOptions::new().create(true).append(true).open("errors.log").unwrap();
+        writeln!(log_file, "[verify_zkp_handler] Received proof_bytes (len={}): {}", proof_bytes.len(), hex::encode(&proof_bytes)).ok();
+        writeln!(log_file, "[verify_zkp_handler] Received public_inputs (count={}):", req.public_inputs.len()).ok();
+        for (i, h) in req.public_inputs.iter().enumerate() {
+            writeln!(log_file, "  [{}] {}", i, h).ok();
+        }
+        let mut pub_inputs_fr: Vec<Fr> = Vec::with_capacity(req.public_inputs.len());
+        for (i, h) in req.public_inputs.iter().enumerate() {
+            let b = hex::decode(h).map_err(|e| (StatusCode::BAD_REQUEST, format!("public_inputs[{}] hex decode: {e}", i)))?;
+            if b.len() != 32 {
+                return Err((StatusCode::BAD_REQUEST, format!("public_inputs[{}] length != 32 bytes", i)));
+            }
+            let fr = fr_from_be_bytes(&b).ok_or((StatusCode::BAD_REQUEST, format!("public_inputs[{}] convert to Fr failed", i)))?;
+            pub_inputs_fr.push(fr);
+        }
+        writeln!(log_file, "[verify_zkp_handler] Converted public_inputs to Fr:").ok();
+        for (i, fr) in pub_inputs_fr.iter().enumerate() {
+            writeln!(log_file, "  [{}] {:?}", i, fr.into_bigint()).ok();
+        }
+        // Log VK hash
+        let vk_path = crate::zkp_verifier::vk_path_for_version(&node.config.data_directory, req.vk_version);
+        if let Ok(vk_bytes) = std::fs::read(&vk_path) {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(&vk_bytes);
+            let vk_hash = hasher.finalize();
+            writeln!(log_file, "[verify_zkp_handler] VK hash: {}", hex::encode(vk_hash)).ok();
+        }
+
+        // Call verifier
+    match verify_groth16_bn254(&node.config.data_directory, req.vk_version, &proof_bytes, &pub_inputs_fr, &node.poseidon_params) {
+            Ok(true) => Ok(Json(ZkpVerifyResponse { ok: true, message: "verified".into() })),
+            Ok(false) => Ok(Json(ZkpVerifyResponse { ok: false, message: "invalid proof".into() })),
+            Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("verification error: {e}"))),
+        }
+    }
 }

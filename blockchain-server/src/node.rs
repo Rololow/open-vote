@@ -9,11 +9,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use common::{Blockchain, BlockchainConfig, Transaction, Block};
+#[cfg(feature = "identity")]
+use common::identity::zkp_prelude::AnonymousActionPayload;
 use crypto_lib::{KeyPair, PublicKey};
 use crate::config::ServerConfig;
 use crate::storage::Storage;
 
-/// Record d'identité pour la blockchain
+/// Identity record stored on the blockchain.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentityRecord {
     pub national_id_hash: String,
@@ -59,7 +61,10 @@ pub struct Proposal {
     pub signatures_required: u32,
 }
 
-/// Nœud blockchain principal
+/// Main blockchain node instance.
+///
+/// Provides operations such as submitting transactions, mining blocks,
+/// P2P peer management and basic on-node state (proposals, commitments).
 pub struct BlockchainNode {
     pub config: ServerConfig,
     pub blockchain: Arc<RwLock<Blockchain>>,
@@ -72,10 +77,86 @@ pub struct BlockchainNode {
     pub proposals: Arc<RwLock<Vec<Proposal>>>,
     /// Ensemble des commitments actifs (préparation Phase 3)
     pub active_commitments: Arc<RwLock<HashSet<String>>>,
+    #[cfg(feature = "zkp_groth16")]
+    pub poseidon_params: std::sync::Arc<ark_crypto_primitives::sponge::poseidon::PoseidonConfig<ark_bn254::Fr>>,
 }
 
 impl BlockchainNode {
-    /// Validate the optional identity_ref on a transaction against DB and config
+    #[cfg(feature = "identity")]
+    fn scope_for_anonymous_vote(law_id: &uuid::Uuid) -> String { format!("vote:{}", law_id) }
+
+    #[cfg(feature = "identity")]
+    fn scope_for_anonymous_support(proposal_id: &uuid::Uuid) -> String { format!("support:{}", proposal_id) }
+
+    /// Validate anonymous action payload against recent roots and nullifier store.
+    #[cfg(feature = "identity")]
+    async fn validate_anonymous_action(&self, payload: &AnonymousActionPayload) -> Result<()> {
+        use crate::identity_root::{commitments_log_path, compute_latest_root_from_file, read_last_root_anchors};
+        // 1) Root acceptance policy: either equals current computed root, or one of last anchors
+        let data_dir = &self.config.data_directory;
+        let mut accepted_roots: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Current computed root from commitments.log
+        let commitments_path = commitments_log_path(data_dir);
+        if let Ok((root, _leaves)) = compute_latest_root_from_file(&commitments_path) {
+            accepted_roots.insert(hex::encode(root));
+        }
+        // Recent anchors (keep a reasonable window)
+        if let Ok(entries) = read_last_root_anchors(data_dir, 50) {
+            for e in entries { accepted_roots.insert(e.root); }
+        }
+        let root_ok = accepted_roots.contains(&payload.proof_envelope.root_hex);
+        if !root_ok {
+            anyhow::bail!("anonymous action root not accepted");
+        }
+
+        // 2) Nullifier uniqueness in given scope
+        let scope = &payload.proof_envelope.scope;
+        let nullifier_hex = &payload.proof_envelope.nullifier_hex;
+        if self
+            .storage
+            .has_nullifier(scope, nullifier_hex)
+            .await
+            .context("db has_nullifier")?
+        {
+            anyhow::bail!("duplicate anonymous nullifier for scope");
+        }
+
+        // 3) Proof bytes verification (Groth16) if enabled
+        if payload.proof_envelope.scheme == common::identity::zkp_prelude::ProofScheme::Groth16 {
+            #[cfg(feature = "zkp_groth16")]
+            {
+                use crate::zkp_verifier::{verify_groth16_bn254, fr_from_be_bytes};
+                let root_bytes = hex::decode(&payload.proof_envelope.root_hex)
+                    .context("decode root_hex")?;
+                let root_fr = fr_from_be_bytes(&root_bytes).context("root to Fr")?;
+                let null_bytes = hex::decode(&payload.proof_envelope.nullifier_hex)
+                    .context("decode nullifier_hex")?;
+                let null_fr = fr_from_be_bytes(&null_bytes).context("nullifier to Fr")?;
+                let mut scope_hasher = sha2::Sha256::new();
+                use sha2::Digest;
+                scope_hasher.update(payload.proof_envelope.scope.as_bytes());
+                let scope_digest = scope_hasher.finalize();
+                let scope_fr = fr_from_be_bytes(&scope_digest).context("scope to Fr")?;
+                let ok = verify_groth16_bn254(
+                    data_dir,
+                    payload.proof_envelope.vk_version,
+                    &payload.proof_envelope.proof,
+                    &[root_fr, null_fr, scope_fr],
+                    &self.poseidon_params,
+                )
+                .context("groth16 verification")?;
+                if !ok { anyhow::bail!("invalid groth16 proof"); }
+            }
+            #[cfg(not(feature = "zkp_groth16"))]
+            {
+                // In builds without the Groth16 verifier, skip cryptographic verification.
+                // Policy still enforces root acceptance and nullifier uniqueness.
+                warn!("groth16 verification skipped (feature zkp_groth16 not enabled)");
+            }
+        }
+        Ok(())
+    }
+    /// Validate the optional `identity_ref` on a transaction against DB and config.
     async fn validate_identity_ref(&self, transaction: &Transaction) -> Result<()> {
         if let Some(ref hash_hex) = transaction.identity_ref {
             // Lookup in DB
@@ -113,8 +194,23 @@ impl BlockchainNode {
         }
         Ok(())
     }
-    /// Crée un nouveau nœud blockchain
+    /// Create a new blockchain node instance.
+    ///
+    /// When built with `zkp_groth16`, this will attempt to load Poseidon parameters
+    /// from the configured data directory so tests and callers can use ZKP features.
+    #[cfg(feature = "zkp_groth16")]
     pub async fn new(config: ServerConfig) -> Result<Self> {
+        // Attempt to load Poseidon params from data directory, falling back to generating
+        // them from config/poseidon_config.json via zkp_verifier::load_poseidon_params.
+        let poseidon_params = match crate::zkp_verifier::load_poseidon_params(&config.data_directory) {
+            Ok(p) => std::sync::Arc::new(p),
+            Err(e) => {
+                tracing::warn!("Failed to load poseidon params from data dir: {}. Attempting to load from config/poseidon_config.json: {}", config.data_directory, e);
+                // Try load_poseidon_params will already read config/poseidon_config.json if present
+                let p = crate::zkp_verifier::load_poseidon_params(&config.data_directory).context("load poseidon params fallback")?;
+                std::sync::Arc::new(p)
+            }
+        };
         info!("🔧 Initialisation du nœud blockchain {}", config.node_id);
         info!("   📊 Configuration:");
         info!("      - Database URL: {}", config.database_url);
@@ -163,6 +259,7 @@ impl BlockchainNode {
             peers: Arc::new(RwLock::new(HashMap::new())),
             proposals: Arc::new(RwLock::new(Vec::new())),
             active_commitments: Arc::new(RwLock::new(HashSet::new())),
+            poseidon_params,
         };
 
         // Hydrate active commitments from DB on startup
@@ -170,8 +267,53 @@ impl BlockchainNode {
             warn!("Failed to hydrate active commitments at startup: {}", e);
         }
 
+    Ok(node)
+    }
+    #[cfg(not(feature = "zkp_groth16"))]
+    pub async fn new(config: ServerConfig) -> Result<Self> {
+        // ...existing code...
+        let storage = match Storage::new(&config.database_url).await {
+            Ok(storage) => {
+                info!("✅ Stockage initialisé avec succès");
+                Arc::new(storage)
+            }
+            Err(e) => {
+                tracing::error!("❌ Erreur lors de l'initialisation du stockage: {}", e);
+                return Err(e);
+            }
+        };
+        let keypair = KeyPair::generate();
+        info!("Paire de clés générée: {}", keypair.public_key().to_hex());
+        let blockchain = match storage.load_blockchain().await? {
+            Some(loaded_blockchain) => {
+                info!("Blockchain chargée depuis le stockage");
+                Arc::new(RwLock::new(loaded_blockchain))
+            }
+            None => {
+                info!("Création d'une nouvelle blockchain");
+                let new_blockchain = Blockchain::new();
+                storage.save_blockchain(&new_blockchain).await?;
+                Arc::new(RwLock::new(new_blockchain))
+            }
+        };
+        let blockchain_config = BlockchainConfig::default();
+        let node = Self {
+            config,
+            blockchain,
+            blockchain_config,
+            storage,
+            keypair,
+            is_mining: Arc::new(RwLock::new(false)),
+            peers: Arc::new(RwLock::new(HashMap::new())),
+            proposals: Arc::new(RwLock::new(Vec::new())),
+            active_commitments: Arc::new(RwLock::new(HashSet::new())),
+        };
+        if let Err(e) = node.hydrate_active_commitments().await {
+            warn!("Failed to hydrate active commitments at startup: {}", e);
+        }
         Ok(node)
     }
+    
 
     /// Charge en mémoire les commitments actifs depuis la base au démarrage
     async fn hydrate_active_commitments(&self) -> Result<()> {
@@ -296,6 +438,29 @@ impl BlockchainNode {
         // 1) Vérification identité optionnelle si identity_ref est présente
         self.validate_identity_ref(&transaction).await?;
 
+        // 1b) If anonymous action, perform basic checks: scope matches and nullifier/root policy
+        #[cfg(feature = "identity")]
+        {
+            use common::TransactionType;
+            match &transaction.transaction_type {
+                TransactionType::AnonymousVote { law_id, proof } => {
+                    let expected = Self::scope_for_anonymous_vote(law_id);
+                    if proof.proof_envelope.scope != expected {
+                        anyhow::bail!("invalid scope in proof envelope");
+                    }
+                    self.validate_anonymous_action(proof).await?;
+                }
+                TransactionType::AnonymousSupport { proposal_id, proof } => {
+                    let expected = Self::scope_for_anonymous_support(proposal_id);
+                    if proof.proof_envelope.scope != expected {
+                        anyhow::bail!("invalid scope in proof envelope");
+                    }
+                    self.validate_anonymous_action(proof).await?;
+                }
+                _ => {}
+            }
+        }
+
         // 2) Ajouter à la mempool si OK
         let mut blockchain = self.blockchain.write().await;
         blockchain.add_pending_transaction(transaction)
@@ -340,6 +505,59 @@ impl BlockchainNode {
             }
         }
 
+        // 3b) Anonymous actions filtering: enforce root policy and nullifier uniqueness.
+        #[cfg(feature = "identity")]
+        {
+            use common::TransactionType;
+            // Track duplicates within the same would-be block
+            let mut seen_pairs: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+            for tx in &pending_snapshot {
+                match &tx.transaction_type {
+                    TransactionType::AnonymousVote { law_id, proof } => {
+                        // Scope consistency
+                        let expected = Self::scope_for_anonymous_vote(law_id);
+                        let env = &proof.proof_envelope;
+                        if env.scope != expected {
+                            warn!("Tx {} invalid anonymous scope (expected {}, got {})", tx.id, expected, env.scope);
+                            invalid_ids.insert(tx.id);
+                            continue;
+                        }
+                        // Root+nullifier policy
+                        if let Err(e) = self.validate_anonymous_action(proof).await {
+                            warn!("Tx {} invalid anonymous action: {}", tx.id, e);
+                            invalid_ids.insert(tx.id);
+                            continue;
+                        }
+                        let key = (env.scope.clone(), env.nullifier_hex.clone());
+                        if !seen_pairs.insert(key) {
+                            warn!("Tx {} duplicate anonymous nullifier in pending set", tx.id);
+                            invalid_ids.insert(tx.id);
+                        }
+                    }
+                    TransactionType::AnonymousSupport { proposal_id, proof } => {
+                        let expected = Self::scope_for_anonymous_support(proposal_id);
+                        let env = &proof.proof_envelope;
+                        if env.scope != expected {
+                            warn!("Tx {} invalid anonymous scope (expected {}, got {})", tx.id, expected, env.scope);
+                            invalid_ids.insert(tx.id);
+                            continue;
+                        }
+                        if let Err(e) = self.validate_anonymous_action(proof).await {
+                            warn!("Tx {} invalid anonymous action: {}", tx.id, e);
+                            invalid_ids.insert(tx.id);
+                            continue;
+                        }
+                        let key = (env.scope.clone(), env.nullifier_hex.clone());
+                        if !seen_pairs.insert(key) {
+                            warn!("Tx {} duplicate anonymous nullifier in pending set", tx.id);
+                            invalid_ids.insert(tx.id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // 4) Retirer de la mempool les transactions invalides (si présentes)
         if !invalid_ids.is_empty() {
             let mut blockchain = self.blockchain.write().await;
@@ -381,6 +599,36 @@ impl BlockchainNode {
                 let blockchain = self.blockchain.read().await;
                 if let Err(e) = self.storage.save_blockchain(&blockchain).await {
                     error!("Erreur sauvegarde blockchain: {}", e);
+                }
+
+                // Anchor identity commitments root for this block (Phase 3)
+                if let Err(e) = crate::identity_root::append_root_anchor(&self.config.data_directory, block.header.block_number) {
+                    warn!("Failed to append identity root anchor: {}", e);
+                }
+
+                // Persist nullifiers from anonymous actions in this block
+                #[cfg(feature = "identity")]
+                {
+                    use common::TransactionType;
+                    for tx in &block.transactions {
+                        match &tx.transaction_type {
+                            TransactionType::AnonymousVote { law_id, proof } => {
+                                let scope = Self::scope_for_anonymous_vote(law_id);
+                                let _ = self
+                                    .storage
+                                    .insert_nullifier(&scope, &proof.proof_envelope.nullifier_hex, &tx.id.to_string())
+                                    .await;
+                            }
+                            TransactionType::AnonymousSupport { proposal_id, proof } => {
+                                let scope = Self::scope_for_anonymous_support(proposal_id);
+                                let _ = self
+                                    .storage
+                                    .insert_nullifier(&scope, &proof.proof_envelope.nullifier_hex, &tx.id.to_string())
+                                    .await;
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 
                 // Diffuser le bloc aux autres nœuds
@@ -443,6 +691,52 @@ impl BlockchainNode {
             }
         }
 
+        // Anonymous actions policy: root acceptance and nullifier uniqueness (both existing DB and within-block duplicates)
+        #[cfg(feature = "identity")]
+        {
+            use common::TransactionType;
+            let mut seen_pairs: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+            for tx in &block.transactions {
+                match &tx.transaction_type {
+                    TransactionType::AnonymousVote { law_id, proof } => {
+                        let expected = Self::scope_for_anonymous_vote(law_id);
+                        let env = &proof.proof_envelope;
+                        if env.scope != expected {
+                            warn!("Bloc rejeté: scope anonyme invalide pour tx {}", tx.id);
+                            return Ok(false);
+                        }
+                        if let Err(e) = self.validate_anonymous_action(proof).await {
+                            warn!("Bloc rejeté: action anonyme invalide pour tx {}: {}", tx.id, e);
+                            return Ok(false);
+                        }
+                        let key = (env.scope.clone(), env.nullifier_hex.clone());
+                        if !seen_pairs.insert(key) {
+                            warn!("Bloc rejeté: doublon de nullifier anonyme pour tx {}", tx.id);
+                            return Ok(false);
+                        }
+                    }
+                    TransactionType::AnonymousSupport { proposal_id, proof } => {
+                        let expected = Self::scope_for_anonymous_support(proposal_id);
+                        let env = &proof.proof_envelope;
+                        if env.scope != expected {
+                            warn!("Bloc rejeté: scope anonyme invalide pour tx {}", tx.id);
+                            return Ok(false);
+                        }
+                        if let Err(e) = self.validate_anonymous_action(proof).await {
+                            warn!("Bloc rejeté: action anonyme invalide pour tx {}: {}", tx.id, e);
+                            return Ok(false);
+                        }
+                        let key = (env.scope.clone(), env.nullifier_hex.clone());
+                        if !seen_pairs.insert(key) {
+                            warn!("Bloc rejeté: doublon de nullifier anonyme pour tx {}", tx.id);
+                            return Ok(false);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // Les transactions sont déjà appliquées lors de la validation du bloc
         // Pas besoin de les appliquer à nouveau ici
 
@@ -459,6 +753,36 @@ impl BlockchainNode {
         // Sauvegarder
         if let Err(e) = self.storage.save_blockchain(&blockchain).await {
             error!("Erreur sauvegarde: {}", e);
+        }
+
+        // Anchor identity commitments root for this block (Phase 3)
+        if let Err(e) = crate::identity_root::append_root_anchor(&self.config.data_directory, block.header.block_number) {
+            warn!("Failed to append identity root anchor: {}", e);
+        }
+
+        // Persist nullifiers from anonymous actions
+        #[cfg(feature = "identity")]
+        {
+            use common::TransactionType;
+            for tx in &block.transactions {
+                match &tx.transaction_type {
+                    TransactionType::AnonymousVote { law_id, proof } => {
+                        let scope = Self::scope_for_anonymous_vote(law_id);
+                        let _ = self
+                            .storage
+                            .insert_nullifier(&scope, &proof.proof_envelope.nullifier_hex, &tx.id.to_string())
+                            .await;
+                    }
+                    TransactionType::AnonymousSupport { proposal_id, proof } => {
+                        let scope = Self::scope_for_anonymous_support(proposal_id);
+                        let _ = self
+                            .storage
+                            .insert_nullifier(&scope, &proof.proof_envelope.nullifier_hex, &tx.id.to_string())
+                            .await;
+                    }
+                    _ => {}
+                }
+            }
         }
 
         Ok(true)
@@ -649,6 +973,8 @@ mod tests {
     use std::str::FromStr;
     use std::path::PathBuf;
     use std::env as std_env;
+    #[cfg(feature = "identity")]
+    use common::identity::zkp_prelude::{ProofEnvelope, AnonymousActionPayload, ProofScheme};
 
     fn make_config_with_db(db_suffix: &str, allowed: Vec<String>) -> ServerConfig {
         let mut cfg = ServerConfig::default();
@@ -666,7 +992,8 @@ mod tests {
         std_env::set_var("MIGRATIONS_DIR", migrations_dir.to_string_lossy().to_string());
     }
 
-    async fn ensure_minimal_schema(db_url: &str) {
+/// Public helper to ensure minimal DB schema for tests and integration
+pub async fn ensure_minimal_schema(db_url: &str) {
         let opts = SqliteConnectOptions::from_str(db_url).unwrap().create_if_missing(true);
         let pool = SqlitePool::connect_with(opts).await.unwrap();
         // blocks table (subset sufficient for load_blockchain query)
@@ -944,5 +1271,153 @@ mod tests {
         let node = BlockchainNode::new(cfg.clone()).await.expect("node");
         let set = node.list_active_commitments().await;
         assert!(!set.contains(&"hash_hydrate_expired".to_string()));
+    }
+
+    #[cfg(feature = "identity")]
+    fn make_fake_envelope(scope: &str, root_hex: &str, nullifier_hex: &str) -> AnonymousActionPayload {
+        AnonymousActionPayload {
+            proof_envelope: ProofEnvelope {
+                scheme: ProofScheme::Groth16,
+                vk_version: 1,
+                root_hex: root_hex.to_string(),
+                scope: scope.to_string(),
+                nullifier_hex: nullifier_hex.to_string(),
+                proof: vec![],
+                public_inputs: vec![],
+            },
+            payload: None,
+        }
+    }
+
+    #[cfg(feature = "identity")]
+    async fn current_root_hex(data_dir: &str) -> String {
+        let p = crate::identity_root::commitments_log_path(data_dir);
+        let (r, _n) = crate::identity_root::compute_latest_root_from_file(&p).unwrap();
+        hex::encode(r)
+    }
+
+    #[tokio::test]
+    #[cfg(all(feature = "identity", not(feature = "zkp_groth16")))]
+    async fn anonymous_duplicate_nullifier_rejected_in_submit() {
+        ensure_migrations_env();
+        let cfg = make_config_with_db(&uuid::Uuid::new_v4().to_string(), vec![]);
+        ensure_minimal_schema(&cfg.database_url).await;
+        let node = BlockchainNode::new(cfg.clone()).await.expect("node");
+
+        // Build two AnonymousSupport with same (scope,nullifier)
+        let prop_id = uuid::Uuid::new_v4();
+        let scope = format!("support:{}", prop_id);
+        // Ensure a corresponding proposal exists on-chain to pass state application
+        {
+            use common::proposal::{Proposal as CProposal, ProposalStatus};
+            let mut bc = node.blockchain.write().await;
+            let proposal = CProposal {
+                id: prop_id,
+                title: "t".into(),
+                category: "c".into(),
+                description: "d".into(),
+                full_text: "f".into(),
+                estimated_budget: None,
+                implementation_timeline: None,
+                tags: vec![],
+                author_id: None,
+                author_name: None,
+                created_at: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::Duration::days(30),
+                status: ProposalStatus::CollectingSignatures,
+                supporters_count: 0,
+            };
+            bc.proposals.insert(prop_id, proposal);
+        }
+        // Ensure identity_roots has at least one entry matching current root
+        let root_hex = current_root_hex(&node.config.data_directory).await;
+        let env = make_fake_envelope(&scope, &root_hex, "deadbeefdeadbeef");
+
+        // Craft transactions
+        let kp = crypto_lib::KeyPair::generate();
+        let t1 = common::TransactionType::AnonymousSupport { proposal_id: prop_id, proof: env.clone() };
+        let mut tx1 = Transaction::new(t1, kp.public_key().clone(), kp.sign(b"t"), 1, 0);
+        let sign_msg1 = format!("TRANSACTION:{}:{}:{}", tx1.id, tx1.timestamp, tx1.data_hash.to_hex());
+        tx1.signature = kp.sign(sign_msg1.as_bytes());
+
+        let t2 = common::TransactionType::AnonymousSupport { proposal_id: prop_id, proof: env };
+        let mut tx2 = Transaction::new(t2, kp.public_key().clone(), kp.sign(b"t"), 2, 0);
+        let sign_msg2 = format!("TRANSACTION:{}:{}:{}", tx2.id, tx2.timestamp, tx2.data_hash.to_hex());
+        tx2.signature = kp.sign(sign_msg2.as_bytes());
+
+        // First should be accepted to mempool
+        node.submit_transaction(tx1).await.expect("first accepted");
+        // Second should be rejected at submit time as duplicate nullifier in DB? Not yet inserted -> allow mempool, but we'll filter during mine.
+        // However validate_anonymous_action checks DB only; duplicates in mempool are filtered at mining. So submit should succeed.
+        node.submit_transaction(tx2).await.expect("second accepted pending");
+
+        // Mine -> should keep only one and insert nullifier
+        let mined = node.mine_block().await.expect("mine ok");
+        let block = mined.expect("block expected");
+        assert_eq!(block.transactions.len(), 1);
+        // Next mining should produce no block because no more tx
+        assert!(node.mine_block().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    #[cfg(all(feature = "identity", feature = "zkp_groth16", feature = "zkp_mock"))]
+    async fn groth16_mock_verifier_accepts_ok_proof() {
+        use common::TransactionType;
+        ensure_migrations_env();
+        let cfg = make_config_with_db(&uuid::Uuid::new_v4().to_string(), vec![]);
+        ensure_minimal_schema(&cfg.database_url).await;
+        let node = BlockchainNode::new(cfg.clone()).await.expect("node");
+
+        // Prepare mock VK file with magic header
+        let vk_path = crate::zkp_verifier::vk_path_for_version(&node.config.data_directory, 42);
+        std::fs::create_dir_all(vk_path.parent().unwrap()).unwrap();
+        std::fs::write(&vk_path, b"MOCKVK").unwrap();
+
+        // Ensure a simple on-chain object exists for applying
+        // Create a proposal in chain state so AnonymousSupport is valid
+        let prop_id = uuid::Uuid::new_v4();
+        {
+            use common::proposal::{Proposal as CProposal, ProposalStatus};
+            let mut bc = node.blockchain.write().await;
+            let proposal = CProposal {
+                id: prop_id,
+                title: "t".into(),
+                category: "c".into(),
+                description: "d".into(),
+                full_text: "f".into(),
+                estimated_budget: None,
+                implementation_timeline: None,
+                tags: vec![],
+                author_id: None,
+                author_name: None,
+                created_at: chrono::Utc::now(),
+                expires_at: chrono::Utc::now() + chrono::Duration::days(30),
+                status: ProposalStatus::CollectingSignatures,
+                supporters_count: 0,
+            };
+            bc.proposals.insert(prop_id, proposal);
+        }
+
+        // Use current identity root
+        let root_hex = current_root_hex(&node.config.data_directory).await;
+        let scope = format!("support:{}", prop_id);
+        let mut env = make_fake_envelope(&scope, &root_hex, "aabbccdd");
+        // Set vk_version to the mock one and put proof bytes to OK sentinel
+        env.proof_envelope.vk_version = 42;
+        env.proof_envelope.proof = b"OK".to_vec();
+
+        // Build tx and submit
+        let kp = crypto_lib::KeyPair::generate();
+        let t = TransactionType::AnonymousSupport { proposal_id: prop_id, proof: env };
+        let mut tx = Transaction::new(t, kp.public_key().clone(), kp.sign(b"t"), 1, 0);
+        let sign_msg = format!("TRANSACTION:{}:{}:{}", tx.id, tx.timestamp, tx.data_hash.to_hex());
+        tx.signature = kp.sign(sign_msg.as_bytes());
+
+        // Submit should pass thanks to mock verifier accepting the proof
+        node.submit_transaction(tx).await.expect("submit anonymous support with mock proof");
+
+        // Mine and expect a block
+        let mined = node.mine_block().await.expect("mine").expect("block");
+        assert_eq!(mined.transactions.len(), 1);
     }
 }

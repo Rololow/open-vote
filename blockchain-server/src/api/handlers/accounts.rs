@@ -1,7 +1,6 @@
 use axum::{extract::State, response::Json, http::StatusCode};
 use serde_json;
 use tracing::{info, error};
-use uuid::Uuid;
 use common::{Transaction, TransactionType, Account};
 use crypto_lib::{PublicKey, Signature};
 use super::super::{AppState, types::*};

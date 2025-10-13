@@ -8,6 +8,18 @@ description = "Serveur blockchain pour le système e-gouvernement"
 name = "blockchain-server"
 path = "src/main.rs"
 
+[[bin]]
+name = "compute_root"
+path = "src/bin/compute_root.rs"
+
+[[bin]]
+name = "issuer_key_tool"
+path = "src/bin/issuer_key_tool.rs"
+
+[[bin]]
+name = "commitment_proof"
+path = "src/bin/commitment_proof.rs"
+
 [lib]
 name = "blockchain_server"
 path = "src/lib.rs"
@@ -47,8 +59,30 @@ hex = "0.4"
 base64 = "0.21"
 bs58 = "0.5"
 
+# Optional ZKP (Groth16) verifier deps (feature-gated)
+ark-ff = { version = "0.4", optional = true }
+ark-ec = { version = "0.4", optional = true }
+ark-serialize = { version = "0.4", optional = true }
+ark-groth16 = { version = "0.4", optional = true }
+ark-bn254 = { version = "0.4", optional = true }
+ark-relations = { version = "0.4", optional = true }
+ark-snark = { version = "0.4", optional = true }
+ark-crypto-primitives = { version = "0.4.0", features = ["crh"] }
 [features]
 # Pass-through feature to activate identity-related code (DID/VC) from common crate.
 # Enable by default so API identity endpoints are active in tests and typical runs.
 default = ["identity"]
 identity = ["common/identity"]
+zkp_groth16 = [
+	"dep:ark-ff",
+	"dep:ark-ec",
+	"dep:ark-serialize",
+	"dep:ark-groth16",
+	"dep:ark-bn254",
+	"dep:ark-relations",
+	"dep:ark-snark",
+]
+zkp_mock = []
+
+[dev-dependencies]
+tempfile = "3"

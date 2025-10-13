@@ -2,12 +2,18 @@ use ed25519_dalek::Signature as Ed25519Signature;
 use serde::{Deserialize, Serialize};
 use crate::errors::{CryptoError, Result};
 
-/// Wrapper pour les signatures Ed25519
+/// Wrapper for Ed25519 signatures.
+///
+/// The inner value is the `ed25519_dalek::Signature` type; this wrapper
+/// provides convenient constructors and (de)serialization helpers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature(pub(crate) Ed25519Signature);
 
 impl Signature {
-    /// Crée une signature à partir de bytes
+    /// Create a signature from bytes.
+    ///
+    /// # Errors
+    /// Returns an error if the byte slice has an incorrect length.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != 64 {
             return Err(CryptoError::InvalidKey("La signature doit faire 64 bytes".to_string()));
@@ -20,17 +26,24 @@ impl Signature {
         Ok(Signature(signature))
     }
 
-    /// Convertit la signature en bytes
+    /// Convert the signature to bytes.
     pub fn to_bytes(&self) -> [u8; 64] {
         self.0.to_bytes()
     }
 
-    /// Convertit en représentation hexadécimale
+    /// Convert to hexadecimal representation.
     pub fn to_hex(&self) -> String {
         hex::encode(self.to_bytes())
     }
 
-    /// Crée à partir d'une chaîne hexadécimale
+    /// Create from a hexadecimal string.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use crypto_lib::Signature;
+    /// let sig = Signature::from_hex("00").is_err();
+    /// ```
     pub fn from_hex(hex_str: &str) -> Result<Self> {
         let bytes = hex::decode(hex_str)
             .map_err(|e| CryptoError::SerializationError(format!("Hex invalide: {}", e)))?;

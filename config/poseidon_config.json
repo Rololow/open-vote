@@ -1,0 +1,11 @@
+{
+  "poseidon": {
+    "rate": 2,
+    "full_rounds": 8,
+    "partial_rounds": 57,
+    "skip_matrices": 0,
+    "prime_bits": 254,
+    "alpha": 5,
+    "capacity": 1
+  }
+}

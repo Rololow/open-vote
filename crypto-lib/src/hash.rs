@@ -2,12 +2,22 @@ use sha2::{Sha256, Digest};
 use serde::{Deserialize, Serialize};
 use crate::errors::{CryptoError, Result};
 
-/// Hash SHA-256 pour l'intégrité des données
+/// SHA-256 hash for data integrity.
+///
+/// Small value type wrapping a 32-byte array with convenience helpers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Hash([u8; 32]);
 
 impl Hash {
-    /// Calcule le hash SHA-256 de données
+    /// Compute the SHA-256 hash of data.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use crypto_lib::Hash;
+    /// let h = Hash::new(b"abc");
+    /// assert!(!h.is_zero());
+    /// ```
     pub fn new(data: &[u8]) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(data);
@@ -17,7 +27,10 @@ impl Hash {
         Hash(hash)
     }
 
-    /// Crée un hash à partir de bytes
+    /// Create a hash from bytes.
+    ///
+    /// # Errors
+    /// Returns `CryptoError::InvalidKey` if the provided slice is not 32 bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != 32 {
             return Err(CryptoError::InvalidKey("Le hash doit faire 32 bytes".to_string()));
@@ -28,34 +41,34 @@ impl Hash {
         Ok(Hash(hash))
     }
 
-    /// Convertit le hash en bytes
+    /// Convert the hash to bytes.
     pub fn to_bytes(&self) -> [u8; 32] {
         self.0
     }
 
-    /// Convertit en représentation hexadécimale
+    /// Convert to hexadecimal representation.
     pub fn to_hex(&self) -> String {
         hex::encode(self.0)
     }
 
-    /// Crée à partir d'une chaîne hexadécimale
+    /// Create from a hexadecimal string.
     pub fn from_hex(hex_str: &str) -> Result<Self> {
         let bytes = hex::decode(hex_str)
             .map_err(|e| CryptoError::SerializationError(format!("Hex invalide: {}", e)))?;
         Self::from_bytes(&bytes)
     }
 
-    /// Hash vide (zéros)
+    /// Zero hash (all zeros).
     pub fn zero() -> Self {
         Hash([0u8; 32])
     }
 
-    /// Vérifie si le hash est vide
+    /// Check if the hash is zero.
     pub fn is_zero(&self) -> bool {
         self.0 == [0u8; 32]
     }
 
-    /// Hash de plusieurs éléments concaténés
+    /// Hash multiple concatenated elements.
     pub fn multi_hash(elements: &[&[u8]]) -> Self {
         let mut hasher = Sha256::new();
         for element in elements {

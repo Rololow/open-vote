@@ -1,19 +1,21 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use tracing::info;
 use std::path::PathBuf;
 
+/// Expand a path that may start with `~` into an absolute `PathBuf`.
 fn expand_dir(dir: &str) -> PathBuf {
     let expanded = shellexpand::tilde(dir).to_string();
     PathBuf::from(expanded)
 }
 
+/// Load a VC JSON file from disk and parse it.
 fn load_vc_from(file: &PathBuf) -> Result<serde_json::Value> {
     let raw = std::fs::read_to_string(file)?;
     let v: serde_json::Value = serde_json::from_str(&raw)?;
     Ok(v)
 }
 
+/// Extract common metadata fields (issuer, subject, issuance, expiration) from a VC.
 fn vc_metadata(cred: &serde_json::Value) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
     let issuer = cred.get("issuer").and_then(|v| v.as_str()).map(|s| s.to_string());
     let subject = cred
@@ -26,7 +28,10 @@ fn vc_metadata(cred: &serde_json::Value) -> (Option<String>, Option<String>, Opt
     (issuer, subject, issuance, expiration)
 }
 
-fn vc_compute_hash(cred: &serde_json::Value) -> Result<String> {
+/// Compute the canonical commitment hash for a verifiable credential (VC).
+///
+/// The `proof` field is removed before canonicalization.
+pub fn vc_compute_hash(cred: &serde_json::Value) -> Result<String> {
     let mut unsigned = cred.clone();
     if let Some(obj) = unsigned.as_object_mut() { obj.remove("proof"); }
     let raw = serde_json::to_string(&unsigned)?;
@@ -36,6 +41,10 @@ fn vc_compute_hash(cred: &serde_json::Value) -> Result<String> {
     Ok(common::hash_hex(&digest))
 }
 
+/// Quick validation of issuance/expiration dates in a VC.
+///
+/// Returns an error if issuanceDate is missing, in the future, or if expiration
+/// is present and in the past or not after issuance.
 pub fn vc_fail_fast_check_dates(cred: &serde_json::Value) -> Result<()> {
     // issuanceDate required
     let issued_at_str = cred
@@ -62,6 +71,10 @@ pub fn vc_fail_fast_check_dates(cred: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+/// Request a verifiable credential (VC) from an issuer and save it locally.
+///
+/// The function POSTs { "subject_did": <did> } to `<endpoint>/issuer/credential` and
+/// stores the returned credential under `<out_dir>/<commitment_hash>.json`.
 pub async fn vc_request(endpoint: &str, subject_did: &str, out_dir: &str) -> Result<()> {
     let url = format!("{}/issuer/credential", endpoint.trim_end_matches('/'));
     let client = reqwest::Client::new();
@@ -89,6 +102,7 @@ pub async fn vc_request(endpoint: &str, subject_did: &str, out_dir: &str) -> Res
     Ok(())
 }
 
+/// Compute and print the commitment hash for a VC file.
 pub async fn vc_hash(file: &PathBuf) -> Result<()> {
     let raw_json = std::fs::read_to_string(file)?;
     let value: serde_json::Value = serde_json::from_str(&raw_json)?;
@@ -102,6 +116,7 @@ pub async fn vc_hash(file: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// Show metadata for a VC file or a stored credential by hash.
 pub async fn vc_show(file: Option<PathBuf>, hash: Option<String>, dir: &str) -> Result<()> {
     let cred_file = match (file, hash) {
         (Some(f), _) => f,
@@ -120,6 +135,9 @@ pub async fn vc_show(file: Option<PathBuf>, hash: Option<String>, dir: &str) -> 
     Ok(())
 }
 
+/// Check whether a credential commitment exists on the node, optionally
+/// ask the issuer to verify the credential, and optionally POST the
+/// credential to the node to register the commitment.
 pub async fn vc_commit(
     file: Option<PathBuf>,
     hash: Option<String>,

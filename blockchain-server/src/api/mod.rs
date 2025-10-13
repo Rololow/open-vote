@@ -9,13 +9,16 @@ pub mod handlers;
 pub mod routes;
 pub mod issuer_api;
 
-pub use types::*;
+// pub use types::*; // avoid unused import warning
 // pub use handlers::*; // unused re-export (commented)
 
-/// État partagé de l'API
+/// Shared state type for the API handlers.
 type AppState = Arc<BlockchainNode>;
 
-/// Create the main API router with all routes
+/// Create the main API router with all routes.
+///
+/// The returned `Router` is already configured with permissive CORS and
+/// includes the issuer, API and RPC route groups.
 pub fn create_api_router(node: Arc<BlockchainNode>) -> Router {
     let api_routes = routes::create_api_routes();
     let rpc_routes = routes::create_rpc_routes();
@@ -41,7 +44,9 @@ pub fn create_api_router(node: Arc<BlockchainNode>) -> Router {
         .with_state(node)
 }
 
-/// Start the API server (function expected by main.rs)
+/// Start the API server (used by `main.rs`).
+///
+/// Binds to the configured address/port and serves the Axum application.
 pub async fn start_api_server(node: Arc<BlockchainNode>) -> anyhow::Result<()> {
     use tracing::info;
     let app = create_api_router(node.clone());

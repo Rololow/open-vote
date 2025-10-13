@@ -1,11 +1,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite, Row};
+use sqlx::{sqlite::SqlitePoolOptions, Pool, Sqlite};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
 use std::path::Path;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn, error};
+use tracing::info;
 use uuid::Uuid;
 
 /// Module de gestion de la base de données SQLite

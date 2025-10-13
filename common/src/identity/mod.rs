@@ -10,6 +10,8 @@ pub mod did;
 pub mod vc;
 #[cfg(feature = "identity")]
 pub mod commitment;
+#[cfg(feature = "identity")]
+pub mod zkp_prelude;
 
 #[cfg(feature = "identity")]
 pub use did::*;

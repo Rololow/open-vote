@@ -11,6 +11,9 @@ mod consensus;
 mod config;
 mod storage;
 mod issuer; // Phase 2: module d'émission VC
+mod identity_root; // Phase 3: anchored identity roots helpers
+#[cfg(feature = "zkp_groth16")]
+mod zkp_verifier; // Phase 3: Groth16 verifier (optional)
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -66,6 +69,50 @@ async fn main() -> Result<()> {
     } else {
         info!("⚙️ Utilisation de la configuration par défaut");
         ServerConfig::load().await?
+    };
+
+    // Print Poseidon params hash for synchronization/integrity
+    #[cfg(feature = "zkp_groth16")]
+    let _poseidon_params = match crate::zkp_verifier::load_poseidon_params(&config.data_directory) {
+        Ok(params) => {
+            use sha2::{Digest, Sha256};
+            use ark_serialize::CanonicalSerialize;
+            let mut hasher = Sha256::new();
+            hasher.update(&params.full_rounds.to_le_bytes());
+            hasher.update(&params.partial_rounds.to_le_bytes());
+            hasher.update(&params.alpha.to_le_bytes());
+            hasher.update(&params.rate.to_le_bytes());
+            hasher.update(&params.capacity.to_le_bytes());
+            for row in &params.mds {
+                for el in row {
+                    let mut b = Vec::new();
+                    el.serialize_compressed(&mut b).ok();
+                    hasher.update(&b);
+                }
+            }
+            for row in &params.ark {
+                for el in row {
+                    let mut b = Vec::new();
+                    el.serialize_compressed(&mut b).ok();
+                    hasher.update(&b);
+                }
+            }
+            let hash = hasher.finalize();
+            println!("[DEBUG] Poseidon params hash (server): {}", hex::encode(hash));
+            // Also log to errors.log for Python cross-check
+            {
+                use std::fs::OpenOptions;
+                use std::io::Write;
+                if let Ok(mut log_file) = OpenOptions::new().create(true).append(true).open("errors.log") {
+                    writeln!(log_file, "Poseidon params hash (server): {}", hex::encode(hash)).ok();
+                }
+            }
+            std::sync::Arc::new(params)
+        }
+        Err(e) => {
+            eprintln!("[ERROR] Failed to load Poseidon params: {}", e);
+            return Err(e);
+        }
     };
 
     // If only migrating, init storage (which runs migrations) and exit

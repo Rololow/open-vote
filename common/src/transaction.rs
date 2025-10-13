@@ -3,6 +3,8 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use crypto_lib::{Hash, PublicKey, Signature};
 use crate::{Vote, Law, Account, proposal::Proposal, VerifiedAttestation};
+#[cfg(feature = "identity")]
+use crate::identity::zkp_prelude::AnonymousActionPayload;
 
 /// Types de transactions dans le système e-gouvernement
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +26,11 @@ pub enum TransactionType {
     VerifyAccount(VerifiedAttestation),
     /// Révoquer une attestation de vérification
     RevokeVerification { attestation_id: Uuid, reason: Option<String> },
+    // ===== Anonymous actions (Phase 3)
+    #[cfg(feature = "identity")]
+    AnonymousVote { law_id: Uuid, proof: AnonymousActionPayload },
+    #[cfg(feature = "identity")]
+    AnonymousSupport { proposal_id: Uuid, proof: AnonymousActionPayload },
 }
 
 /// Transaction dans la blockchain
