@@ -135,6 +135,70 @@ pub async fn vc_show(file: Option<PathBuf>, hash: Option<String>, dir: &str) -> 
     Ok(())
 }
 
+/// Liste les VC stockés localement dans un dossier (~/.e-gov-wallet/credentials par défaut).
+pub async fn vc_list(dir: &str) -> Result<()> {
+    let dir_path = expand_dir(dir);
+    if !dir_path.exists() {
+        println!("Aucun VC trouvé (dossier inexistant): {}", dir_path.display());
+        return Ok(());
+    }
+
+    let mut entries: Vec<PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(&dir_path)? {
+        let e = entry?;
+        if e.file_type()?.is_file() {
+            if let Some(ext) = e.path().extension() {
+                if ext == "json" { entries.push(e.path()); }
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        println!("Aucun VC trouvé dans {}", dir_path.display());
+        return Ok(());
+    }
+
+    entries.sort();
+    println!("VC stockés dans {}:", dir_path.display());
+    for path in entries {
+        match load_vc_from(&path) {
+            Ok(cred) => {
+                let (issuer, subject, issuance, expiration) = vc_metadata(&cred);
+                let hash_hex = vc_compute_hash(&cred).unwrap_or_else(|_| String::from("<hash_err>"));
+                println!(
+                    "- {} | issuer={} | subject={} | issuance={} | expiration={}",
+                    hash_hex,
+                    issuer.unwrap_or_default(),
+                    subject.unwrap_or_default(),
+                    issuance.unwrap_or_default(),
+                    expiration.unwrap_or_default(),
+                );
+            }
+            Err(e) => {
+                println!("- {} (erreur lecture: {})", path.display(), e);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Révoque localement (supprime le fichier) d'un VC, par --file ou --hash dans un dossier.
+pub async fn vc_revoke_local(file: Option<PathBuf>, hash: Option<String>, dir: &str, _yes: bool) -> Result<()> {
+    let cred_file = match (file, hash) {
+        (Some(f), _) => f,
+        (None, Some(h)) => expand_dir(dir).join(format!("{}.json", h)),
+        (None, None) => anyhow::bail!("Fournir --file ou --hash"),
+    };
+
+    if cred_file.exists() {
+        std::fs::remove_file(&cred_file)?;
+        println!("✅ Supprimé: {}", cred_file.display());
+        Ok(())
+    } else {
+        anyhow::bail!("Fichier introuvable: {}", cred_file.display())
+    }
+}
+
 /// Check whether a credential commitment exists on the node, optionally
 /// ask the issuer to verify the credential, and optionally POST the
 /// credential to the node to register the commitment.

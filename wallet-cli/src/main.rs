@@ -17,10 +17,34 @@ use std::path::PathBuf;
 use tracing::{info, error};
 
 mod identity;
+mod keystore;
 #[cfg(feature = "zkp_groth16")]
 mod zkp;
 #[cfg(feature = "zkp_halo2")]
 mod zkp_halo2;
+
+// Helper: resolve secret key material from keystore (preferred) or fallback file
+fn resolve_secret(
+    key_file: &PathBuf,
+    key_id: &Option<String>,
+    passphrase: &Option<String>,
+    store: &Option<String>,
+) -> anyhow::Result<[u8; 32]> {
+    if let Some(kid) = key_id {
+        let pass = match passphrase {
+            Some(p) => p.clone(),
+            None => std::env::var("WALLET_PASSPHRASE").map_err(|_| anyhow::anyhow!("passphrase requise: fournir --passphrase ou la variable d'environnement WALLET_PASSPHRASE"))?,
+        };
+        return keystore::load_private_key(&pass, kid, store.as_deref());
+    }
+    // Fallback fichier clé hex 32 octets
+    let private_key_hex = std::fs::read_to_string(key_file)?;
+    let private_key_bytes = hex::decode(private_key_hex.trim())?;
+    if private_key_bytes.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
+    let mut bytes_array = [0u8; 32];
+    bytes_array.copy_from_slice(&private_key_bytes);
+    Ok(bytes_array)
+}
 
 #[derive(Parser)]
 #[command(name = "wallet-cli")]
@@ -33,6 +57,79 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    // Keystore chiffré
+    KeystoreInit {
+        /// Passphrase (attention: privilégier la saisie via variable d'environnement en CI)
+        #[arg(long)]
+        passphrase: String,
+        /// Chemin du fichier keystore (défaut: ~/.e-gov-wallet/keys.enc)
+        #[arg(long)]
+        store: Option<String>,
+    },
+    KeystoreList {
+        #[arg(long)]
+        passphrase: String,
+        #[arg(long)]
+        store: Option<String>,
+    },
+    KeystoreImport {
+        #[arg(long)]
+        passphrase: String,
+        #[arg(long)]
+        private_key_hex: String,
+        #[arg(long)]
+        public_key_hex: String,
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        store: Option<String>,
+    },
+    KeystoreExport {
+        #[arg(long)]
+        passphrase: String,
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        store: Option<String>,
+    },
+    KeystoreRemove {
+        #[arg(long)]
+        passphrase: String,
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        store: Option<String>,
+    },
+    KeystoreBackup {
+        /// Copie du keystore chiffré vers un fichier cible
+        #[arg(long)]
+        out: String,
+        /// Chemin du keystore source
+        #[arg(long)]
+        store: Option<String>,
+    },
+    KeystoreRestore {
+        /// Fichier de backup à restaurer
+        #[arg(long)]
+        backup: String,
+        #[arg(long)]
+        store: Option<String>,
+    },
+    /// Génère une paire de clés et l'importe dans le keystore (sans fichier en clair)
+    KeystoreGenerateKeypair {
+        /// Passphrase du keystore
+        #[arg(long)]
+        passphrase: String,
+        /// Identifiant optionnel (défaut: préfixe de la clé publique)
+        #[arg(long)]
+        id: Option<String>,
+        /// Chemin du keystore
+        #[arg(long)]
+        store: Option<String>,
+        /// Sortie JSON machine-readable
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Génère une nouvelle paire de clés Ed25519
     GenerateKeypair {
         /// Chemin où sauvegarder la clé privée
@@ -53,6 +150,15 @@ enum Commands {
         /// Fichier de clé privée (32 octets hex) pour dériver un secret stable
         #[arg(short, long, default_value = "private_key.pem")]
         key_file: PathBuf,
+        /// Identifiant de clé dans le keystore (prend le pas sur --key-file)
+        #[arg(long)]
+        key_id: Option<String>,
+        /// Passphrase du keystore (sinon WALLET_PASSPHRASE)
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Chemin du keystore
+        #[arg(long)]
+        store: Option<String>,
         /// Adresse du nœud blockchain
         #[arg(long, default_value = "http://localhost:3000")]
         node_url: String,
@@ -65,6 +171,15 @@ enum Commands {
         /// Fichier de clé privée (32 octets hex) pour dériver un secret stable
         #[arg(short, long, default_value = "private_key.pem")]
         key_file: PathBuf,
+        /// Identifiant de clé dans le keystore (prend le pas sur --key-file)
+        #[arg(long)]
+        key_id: Option<String>,
+        /// Passphrase du keystore (sinon WALLET_PASSPHRASE)
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Chemin du keystore
+        #[arg(long)]
+        store: Option<String>,
         /// Adresse du nœud blockchain
         #[arg(long, default_value = "http://localhost:3000")]
         node_url: String,
@@ -88,6 +203,15 @@ enum Commands {
         /// Chemin de la clé privée (32 octets hex)
         #[arg(short, long, default_value = "private_key.pem")]
         key_file: PathBuf,
+        /// Identifiant de clé dans le keystore (prend le pas sur --key-file)
+        #[arg(long)]
+        key_id: Option<String>,
+        /// Passphrase du keystore (sinon WALLET_PASSPHRASE)
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Chemin du keystore
+        #[arg(long)]
+        store: Option<String>,
         /// Fichier VC JSON pour calculer le commitment
         #[arg(long)]
         vc_file: PathBuf,
@@ -110,6 +234,15 @@ enum Commands {
         /// Chemin de la clé privée (32 octets hex)
         #[arg(short, long, default_value = "private_key.pem")]
         key_file: PathBuf,
+        /// Identifiant de clé dans le keystore (prend le pas sur --key-file)
+        #[arg(long)]
+        key_id: Option<String>,
+        /// Passphrase du keystore (sinon WALLET_PASSPHRASE)
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Chemin du keystore
+        #[arg(long)]
+        store: Option<String>,
         /// Fichier VC JSON pour calculer le commitment
         #[arg(long)]
         vc_file: PathBuf,
@@ -191,15 +324,39 @@ enum Commands {
         /// Chemin vers le fichier de clé privée
         #[arg(short, long, default_value = "private_key.pem")]
         key_file: PathBuf,
+        /// Identifiant de clé dans le keystore (prend le pas sur --key-file)
+        #[arg(long)]
+        key_id: Option<String>,
+        /// Passphrase du keystore (sinon WALLET_PASSPHRASE)
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Chemin du keystore
+        #[arg(long)]
+        store: Option<String>,
         /// Adresse du nœud blockchain
         #[arg(long, default_value = "http://localhost:3000")]
         node_url: String,
+        /// Sortie JSON machine-readable
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Génère un did:key à partir d'une clé privée Ed25519
     DidGenerate {
         /// Chemin vers le fichier de clé privée (hex)
         #[arg(short, long, default_value = "private_key.pem")]
         key_file: PathBuf,
+        /// Identifiant de clé dans le keystore (prend le pas sur --key-file)
+        #[arg(long)]
+        key_id: Option<String>,
+        /// Passphrase du keystore (sinon WALLET_PASSPHRASE)
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Chemin du keystore
+        #[arg(long)]
+        store: Option<String>,
+        /// Sortie JSON machine-readable
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Demande un VC à l'issuer et le sauvegarde localement
     VcRequest {
@@ -231,6 +388,27 @@ enum Commands {
         #[arg(long, default_value = "~/.e-gov-wallet/credentials")]
         dir: String,
     },
+    /// Liste les VC locaux dans un dossier
+    VcList {
+        /// Dossier des VC
+        #[arg(long, default_value = "~/.e-gov-wallet/credentials")]
+        dir: String,
+    },
+    /// Révocation locale (suppression fichier): par --file ou --hash
+    VcRevokeLocal {
+        /// Fichier VC JSON (sinon fournir --hash)
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Hash d'un VC (si --file non fourni)
+        #[arg(long)]
+        hash: Option<String>,
+        /// Dossier des VC (si on passe un hash)
+        #[arg(long, default_value = "~/.e-gov-wallet/credentials")]
+        dir: String,
+        /// Confirmer la suppression sans invite
+        #[arg(long, default_value_t = true)]
+        yes: bool,
+    },
     /// Vérifie la présence du commitment côté nœud (et optionnellement vérifie le VC côté issuer)
     VcCommit {
         /// Fichier VC JSON (sinon fournir --hash)
@@ -259,6 +437,52 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        // keystore
+        Commands::KeystoreInit { passphrase, store } => {
+            keystore::init_if_absent(&passphrase, store.as_deref())?; Ok(())
+        }
+        Commands::KeystoreList { passphrase, store } => {
+            keystore::list(&passphrase, store.as_deref())
+        }
+        Commands::KeystoreImport { passphrase, private_key_hex, public_key_hex, id, store } => {
+            keystore::import_key(&passphrase, &private_key_hex, &public_key_hex, id.as_deref(), store.as_deref()).map(|_| ())
+        }
+        Commands::KeystoreExport { passphrase, id, store } => {
+            let e = keystore::export_key(&passphrase, &id, store.as_deref())?; 
+            println!("{}", serde_json::to_string_pretty(&e)?);
+            Ok(())
+        }
+        Commands::KeystoreRemove { passphrase, id, store } => {
+            keystore::remove_key(&passphrase, &id, store.as_deref())
+        }
+        Commands::KeystoreBackup { out, store } => {
+            keystore::backup(store.as_deref(), &out).map(|_| ())
+        }
+        Commands::KeystoreRestore { backup, store } => {
+            keystore::restore(store.as_deref(), &backup).map(|_| ())
+        }
+        Commands::KeystoreGenerateKeypair { passphrase, id, store, json } => {
+            use crypto_lib::KeyPair;
+            use base64ct::{Base64UrlUnpadded, Encoding};
+            // Génération
+            let kp = KeyPair::generate();
+            let priv_hex = hex::encode(kp.private_key_bytes());
+            let pub_hex = kp.public_key().to_hex();
+            // Import dans keystore
+            let kid = keystore::import_key(&passphrase, &priv_hex, &pub_hex, id.as_deref(), store.as_deref())?;
+            // did:key
+            let pk = kp.public_key().to_bytes();
+            let mut data = Vec::with_capacity(34); data.push(0xED); data.push(0x01); data.extend_from_slice(&pk);
+            let did = format!("did:key:z{}", bs58::encode(data).into_string());
+            if json {
+                let out = serde_json::json!({"id": kid, "public_key": pub_hex, "did": did});
+                println!("{}", serde_json::to_string_pretty(&out)?);
+            } else {
+                println!("✅ Généré et importé: id={} pub={} did={}", kid, pub_hex, did);
+                println!("Astuce: utilisez --key-id {} avec vos commandes de signature.", kid);
+            }
+            Ok(())
+        }
         Commands::GenerateKeypair { output } => {
             generate_keypair(&output).await
         }
@@ -270,24 +494,30 @@ async fn main() -> Result<()> {
             description,
             identity_hash,
             key_file,
+            key_id,
+            passphrase,
+            store,
             node_url,
+            json,
         } => {
-            create_proposal(&title, &description, identity_hash, &key_file, &node_url).await
+            create_proposal(&title, &description, identity_hash, &key_file, &key_id, &passphrase, &store, &node_url, json).await
         }
-        Commands::DidGenerate { key_file } => did_generate(&key_file).await,
+        Commands::DidGenerate { key_file, key_id, passphrase, store, json } => did_generate(&key_file, &key_id, &passphrase, &store, json).await,
         Commands::VcRequest { endpoint, subject_did, out_dir } => identity::vc_request(&endpoint, &subject_did, &out_dir).await,
         Commands::VcHash { file } => identity::vc_hash(&file).await,
         Commands::VcShow { file, hash, dir } => identity::vc_show(file, hash, &dir).await,
+        Commands::VcList { dir } => identity::vc_list(&dir).await,
+        Commands::VcRevokeLocal { file, hash, dir, yes } => identity::vc_revoke_local(file, hash, &dir, yes).await,
         Commands::VcCommit { file, hash, dir, node_url, issuer_endpoint } => identity::vc_commit(file, hash, &dir, &node_url, issuer_endpoint.as_deref()).await,
         Commands::IdentityRoot { node_url } => identity_root(&node_url).await,
-        Commands::AnonymousSupportMock { proposal_id, key_file, node_url } => anonymous_support_mock(&proposal_id, &key_file, &node_url).await,
-        Commands::AnonymousVoteMock { law_id, key_file, node_url } => anonymous_vote_mock(&law_id, &key_file, &node_url).await,
+        Commands::AnonymousSupportMock { proposal_id, key_file, key_id, passphrase, store, node_url } => anonymous_support_mock(&proposal_id, &key_file, &key_id, &passphrase, &store, &node_url).await,
+        Commands::AnonymousVoteMock { law_id, key_file, key_id, passphrase, store, node_url } => anonymous_vote_mock(&law_id, &key_file, &key_id, &passphrase, &store, &node_url).await,
         #[cfg(feature = "zkp_groth16")]
         Commands::ZkpSetupKeys { data_dir, vk_version } => zkp_setup_keys(&data_dir, vk_version).await,
         #[cfg(feature = "zkp_groth16")]
-        Commands::AnonymousSupport { proposal_id, key_file, vc_file, node_url, data_dir, vk_version } => anonymous_support_real(&proposal_id, &key_file, &vc_file, &node_url, &data_dir, vk_version).await,
+        Commands::AnonymousSupport { proposal_id, key_file, key_id, passphrase, store, vc_file, node_url, data_dir, vk_version } => anonymous_support_real(&proposal_id, &key_file, &key_id, &passphrase, &store, &vc_file, &node_url, &data_dir, vk_version).await,
         #[cfg(feature = "zkp_groth16")]
-        Commands::AnonymousVote { law_id, key_file, vc_file, node_url, data_dir, vk_version } => anonymous_vote_real(&law_id, &key_file, &vc_file, &node_url, &data_dir, vk_version).await,
+        Commands::AnonymousVote { law_id, key_file, key_id, passphrase, store, vc_file, node_url, data_dir, vk_version } => anonymous_vote_real(&law_id, &key_file, &key_id, &passphrase, &store, &vc_file, &node_url, &data_dir, vk_version).await,
         #[cfg(feature = "zkp_groth16")]
         Commands::ZkpProve { data_dir, vk_version, root_hex, scope, nullifier_hex, leaf_hex, secret_hex, merkle_path, directions, out } => zkp_prove_cli(&data_dir, vk_version, &root_hex, &scope, &nullifier_hex, &leaf_hex, &secret_hex, &merkle_path, &directions, &out).await,
     #[cfg(feature = "zkp_groth16")]
@@ -325,7 +555,7 @@ async fn zkp_prove_cli(
     println!("Producing proof (this may take a while)...");
 
     let merkle_path_refs: Vec<&str> = merkle_path.iter().map(|s| s.as_str()).collect();
-    let (proof_bytes, pub_inputs) = prove_membership_nullifier(
+    let (proof_bytes, pub_inputs) = match prove_membership_nullifier(
         data_dir,
         vk_version,
         root_hex,
@@ -335,7 +565,15 @@ async fn zkp_prove_cli(
         secret_hex,
         &merkle_path_refs,
         directions,
-    )?;
+    ) {
+        Ok(ok) => ok,
+        Err(e) => {
+            eprintln!("❌ Échec génération preuve: {}", e);
+            eprintln!("Astuce: vérifiez que le fichier Poseidon params existe et est synchronisé: {}/zkp/poseidon_params.bin", data_dir);
+            eprintln!("Vous pouvez générer les paramètres via: wallet-cli zkp-gen-poseidon-params --data-dir {} (feature zkp_groth16)", data_dir);
+            return Err(e);
+        }
+    };
 
     // Serialize proof bytes to a binary file alongside the JSON
     let mut bin_path = out.clone();
@@ -413,7 +651,11 @@ async fn create_proposal(
     description: &str,
     identity_hash: Option<String>,
     key_file: &PathBuf,
+    key_id: &Option<String>,
+    passphrase: &Option<String>,
+    store: &Option<String>,
     node_url: &str,
+    json: bool,
 ) -> Result<()> {
     use crypto_lib::KeyPair;
     use common::{Transaction, TransactionType, proposal::Proposal};
@@ -423,12 +665,9 @@ async fn create_proposal(
     
     info!("Création d'une proposition de loi...");
 
-    // 1. Charger la clé privée
-    let private_key_hex = fs::read_to_string(key_file)?;
-    let private_key_bytes = hex::decode(private_key_hex.trim())?;
-    let mut bytes_array = [0u8; 32];
-    bytes_array.copy_from_slice(&private_key_bytes);
-    let keypair = KeyPair::from_private_bytes(&bytes_array);
+    // 1. Charger la clé privée (keystore si key_id fourni, sinon fichier)
+    let secret = resolve_secret(key_file, key_id, passphrase, store)?;
+    let keypair = KeyPair::from_private_bytes(&secret);
 
     println!("🔑 Utilisation de la clé publique : {}", keypair.public_key().to_hex());
 
@@ -495,8 +734,17 @@ async fn create_proposal(
 
     if response.status().is_success() {
         let result: serde_json::Value = response.json().await?;
-        println!("✅ Transaction envoyée avec succès !");
-        println!("📋 Réponse du nœud : {}", serde_json::to_string_pretty(&result)?);
+        if json {
+            let out = serde_json::json!({
+                "tx_id": tx.id.to_string(),
+                "status": "ok",
+                "node_response": result,
+            });
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        } else {
+            println!("✅ Transaction envoyée avec succès !");
+            println!("📋 Réponse du nœud : {}", serde_json::to_string_pretty(&result)?);
+        }
     } else {
         let error_text = response.text().await?;
         error!("❌ Erreur lors de l'envoi : {}", error_text);
@@ -506,23 +754,25 @@ async fn create_proposal(
     Ok(())
 }
 
-async fn did_generate(key_file: &PathBuf) -> Result<()> {
+async fn did_generate(key_file: &PathBuf, key_id: &Option<String>, passphrase: &Option<String>, store: &Option<String>, json: bool) -> Result<()> {
     use crypto_lib::KeyPair;
     use base64ct::{Base64UrlUnpadded, Encoding};
 
-    let priv_hex = std::fs::read_to_string(key_file)?;
-    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
-    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
-    let mut priv_bytes = [0u8;32]; priv_bytes.copy_from_slice(&priv_bytes_vec);
+    let priv_bytes = resolve_secret(key_file, key_id, passphrase, store)?;
     let kp = KeyPair::from_private_bytes(&priv_bytes);
     let pk = kp.public_key().to_bytes();
 
     // did:key derivation (multicodec 0xED 0x01 + base58btc prefixed z)
     let mut data = Vec::with_capacity(34); data.push(0xED); data.push(0x01); data.extend_from_slice(&pk);
     let did = format!("did:key:z{}", bs58::encode(data).into_string());
-    println!("did:key = {}", did);
-    // Also print JWK x for convenience
-    println!("jwk.x = {}", Base64UrlUnpadded::encode_string(&pk));
+    if json {
+        let out = serde_json::json!({"did": did, "jwk_x": Base64UrlUnpadded::encode_string(&pk)});
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    } else {
+        println!("did:key = {}", did);
+        // Also print JWK x for convenience
+        println!("jwk.x = {}", Base64UrlUnpadded::encode_string(&pk));
+    }
     Ok(())
 }
 
@@ -539,16 +789,13 @@ async fn identity_root(node_url: &str) -> Result<()> {
     Ok(())
 }
 
-async fn anonymous_support_mock(proposal_id: &str, key_file: &PathBuf, node_url: &str) -> Result<()> {
+async fn anonymous_support_mock(proposal_id: &str, key_file: &PathBuf, key_id: &Option<String>, passphrase: &Option<String>, store: &Option<String>, node_url: &str) -> Result<()> {
     use crypto_lib::KeyPair;
     use common::{Transaction, TransactionType};
     use common::identity::zkp_prelude::{AnonymousActionPayload, ProofEnvelope, ProofScheme, compute_scoped_nullifier_hex};
 
     // Load private key and derive a stable 32-byte secret
-    let priv_hex = std::fs::read_to_string(key_file)?;
-    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
-    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
-    let mut secret = [0u8; 32]; secret.copy_from_slice(&priv_bytes_vec);
+    let secret = resolve_secret(key_file, key_id, passphrase, store)?;
     let kp = KeyPair::from_private_bytes(&secret);
 
     // Fetch current root
@@ -597,16 +844,13 @@ async fn anonymous_support_mock(proposal_id: &str, key_file: &PathBuf, node_url:
     }
 }
 
-async fn anonymous_vote_mock(law_id: &str, key_file: &PathBuf, node_url: &str) -> Result<()> {
+async fn anonymous_vote_mock(law_id: &str, key_file: &PathBuf, key_id: &Option<String>, passphrase: &Option<String>, store: &Option<String>, node_url: &str) -> Result<()> {
     use crypto_lib::KeyPair;
     use common::{Transaction, TransactionType};
     use common::identity::zkp_prelude::{AnonymousActionPayload, ProofEnvelope, ProofScheme, compute_scoped_nullifier_hex};
 
     // Load private key and derive a stable 32-byte secret
-    let priv_hex = std::fs::read_to_string(key_file)?;
-    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
-    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
-    let mut secret = [0u8; 32]; secret.copy_from_slice(&priv_bytes_vec);
+    let secret = resolve_secret(key_file, key_id, passphrase, store)?;
     let kp = KeyPair::from_private_bytes(&secret);
 
     // Fetch current root
@@ -664,17 +908,14 @@ async fn zkp_setup_keys(data_dir: &str, vk_version: u32) -> Result<()> {
 }
 
 #[cfg(feature = "zkp_groth16")]
-async fn anonymous_support_real(proposal_id: &str, key_file: &PathBuf, vc_file: &PathBuf, node_url: &str, data_dir: &str, vk_version: u32) -> Result<()> {
+async fn anonymous_support_real(proposal_id: &str, key_file: &PathBuf, key_id: &Option<String>, passphrase: &Option<String>, store: &Option<String>, vc_file: &PathBuf, node_url: &str, data_dir: &str, vk_version: u32) -> Result<()> {
     use crypto_lib::KeyPair;
     use common::{Transaction, TransactionType};
     use common::identity::zkp_prelude::{AnonymousActionPayload, ProofEnvelope, ProofScheme, compute_scoped_nullifier_hex};
     use crate::zkp::prove_membership_nullifier;
 
     // Load private key and derive stable secret
-    let priv_hex = std::fs::read_to_string(key_file)?;
-    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
-    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
-    let mut secret = [0u8; 32]; secret.copy_from_slice(&priv_bytes_vec);
+    let secret = resolve_secret(key_file, key_id, passphrase, store)?;
     let kp = KeyPair::from_private_bytes(&secret);
 
     // Compute commitment hash from VC
@@ -755,16 +996,13 @@ async fn anonymous_support_real(proposal_id: &str, key_file: &PathBuf, vc_file: 
 }
 
 #[cfg(feature = "zkp_groth16")]
-async fn anonymous_vote_real(law_id: &str, key_file: &PathBuf, vc_file: &PathBuf, node_url: &str, data_dir: &str, vk_version: u32) -> Result<()> {
+async fn anonymous_vote_real(law_id: &str, key_file: &PathBuf, key_id: &Option<String>, passphrase: &Option<String>, store: &Option<String>, vc_file: &PathBuf, node_url: &str, data_dir: &str, vk_version: u32) -> Result<()> {
     use crypto_lib::KeyPair;
     use common::{Transaction, TransactionType};
     use common::identity::zkp_prelude::{AnonymousActionPayload, ProofEnvelope, ProofScheme, compute_scoped_nullifier_hex};
     use crate::zkp::prove_membership_nullifier;
 
-    let priv_hex = std::fs::read_to_string(key_file)?;
-    let priv_bytes_vec = hex::decode(priv_hex.trim())?;
-    if priv_bytes_vec.len() != 32 { anyhow::bail!("La clé privée doit faire 32 octets hex"); }
-    let mut secret = [0u8; 32]; secret.copy_from_slice(&priv_bytes_vec);
+    let secret = resolve_secret(key_file, key_id, passphrase, store)?;
     let kp = KeyPair::from_private_bytes(&secret);
 
     // Compute commitment hash from VC

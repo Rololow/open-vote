@@ -24,6 +24,11 @@ hex = "0.4"
 bs58 = "0.5"
 base64ct = { version = "1.6", features = ["alloc"] }
 shellexpand = "3.1"
+# keystore deps
+argon2 = "0.5"
+aes-gcm = { version = "0.10", features = ["std"] }
+zeroize = "1.7"
+base64 = "0.21"
 
 [features]
 default = []
