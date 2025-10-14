@@ -100,6 +100,45 @@ Get-FileHash .\data\zkp\poseidon_params.bin -Algorithm SHA256
 
 - Attach those to an issue for deeper cryptographic debugging (field encodings, public input ordering, curve mismatches).
 
+### Poseidon Parameters Synchronization
+
+To ensure successful proof verification, both the wallet-cli and blockchain-server must use the exact same Poseidon parameters file.
+
+**Poseidon parameters file location:**
+- `<data_dir>/zkp/poseidon_params.bin`
+
+**How to synchronize:**
+1. Generate Poseidon parameters once using the wallet-cli:
+   ```powershell
+   cargo run --release -p wallet-cli --features zkp_groth16 --bin wallet-cli -- zkp-gen-poseidon-params --data-dir ./wallet-cli
+   ```
+2. Copy the resulting `poseidon_params.bin` file to both the wallet-cli and server data directories (overwrite any existing file).
+3. Confirm the hashes match by running your workflow and checking `errors.log` for:
+   - `Poseidon params hash (cli): ...`
+   - `Poseidon params hash (serveur): ...`
+   - These hashes must be identical for proof verification to succeed.
+
+**Example parameters (BN254, Groth16, recommended for this project):**
+- Curve: BN254
+- Hash: Poseidon
+- Full rounds: 8
+- Partial rounds: 57
+- Rate: 2
+- Capacity: 1
+- Alpha: 5
+- MDS: 3x3 matrix (see generated file)
+
+### Troubleshooting Poseidon Parameters
+
+1. Ensure the `poseidon_params.bin` file exists in the correct directory.
+2. Compare the file hashes between the wallet-cli and server using:
+   ```powershell
+   Get-FileHash .\wallet-cli\zkp\poseidon_params.bin -Algorithm SHA256
+   Get-FileHash .\blockchain-server\zkp\poseidon_params.bin -Algorithm SHA256
+   ```
+3. If hashes differ, regenerate the parameters and synchronize them again.
+4. Check `errors.log` for mismatched Poseidon hashes or deserialization errors.
+
 ---
 
 If you want, I can also add a small CI job template (GitHub Actions) that runs the script and archives `errors.log` and the produced artifacts when failures occur. Would you like that next?

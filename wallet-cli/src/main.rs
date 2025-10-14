@@ -535,6 +535,29 @@ fn zkp_gen_poseidon_params(data_dir: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "zkp_halo2")]
+fn zkp_gen_poseidon_params(data_dir: &str) -> Result<()> {
+    use halo2_gadgets_poseidon::PoseidonParams;
+    use std::fs;
+    use std::path::Path;
+
+    // Generate Poseidon parameters for Pasta field
+    let params = PoseidonParams::new(3, 8, 57, None);
+
+    // Ensure the directory exists
+    let path = Path::new(data_dir).join("poseidon_params.bin");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    // Save parameters to file
+    let mut file = fs::File::create(&path)?;
+    bincode::serialize_into(&mut file, &params)?;
+
+    println!("✅ Poseidon parameters generated and saved to {}", path.display());
+    Ok(())
+}
+
 #[cfg(feature = "zkp_groth16")]
 async fn zkp_prove_cli(
     data_dir: &str,

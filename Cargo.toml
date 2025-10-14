@@ -8,6 +8,7 @@ members = [
     "tests"
 ]
 resolver = "2"
+exclude = ["external/halo2"]
 
 [workspace.dependencies]
 tokio = { version = "1.35", features = ["full"] }

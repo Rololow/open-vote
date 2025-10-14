@@ -8,3 +8,6 @@ linker = "link.exe"
 
 [net]
 git-fetch-with-cli = true
+
+[workspace]
+exclude = ["external/halo2"]

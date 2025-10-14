@@ -10,21 +10,21 @@
 - Tests E2E : register → vc request → vc commit → anonymous action (si Phase 3 activée)
 
 ## Tâches proposées
-- [ ] 4.1 Finaliser `zkp_bench` intégration au `wallet-cli` pour benchs clients
-- [ ] 4.2 Implémenter keystore chiffré (`~/.e-gov-wallet/keys.enc`) + commandes backup/restore
-- [ ] 4.3 Sous-commandes VC : list, show, revoke-local
-- [ ] 4.4 UX: messages clairs en cas d'échec (params mismatch VK/Poseidon)
-- [ ] 4.5 Préparer mode headless pour CI (pas d'interaction passphrase)
-- [ ] 4.6 Tests unitaires & integration pour wallet flow
+- [x] 4.1 Finaliser `zkp_bench` intégration au `wallet-cli` pour benchs clients
+- [x] 4.2 Implémenter keystore chiffré (`~/.e-gov-wallet/keys.enc`) + commandes backup/restore
+- [x] 4.3 Sous-commandes VC : list, show, revoke-local
+- [x] 4.4 UX: messages clairs en cas d'échec (params mismatch VK/Poseidon)
+- [x] 4.5 Préparer mode headless pour CI (pas d'interaction passphrase)
+- [x] 4.6 Tests unitaires & integration pour wallet flow
 
 ## ZKP: Intégration Poseidon production (Phase 4.7)
 
 Objectif : Remplacer le gadget pédagogique Halo2 par un gadget Poseidon de production (Halo2-compatible) et fournir la génération/validation des paramètres Poseidon pour le champ Pasta (utilisé par Halo2).
 
 Tâches détaillées :
-- [ ] 4.7.1 Choisir et ajouter une dépendance de gadget Poseidon compatible Halo2 (git pin pour cohérence avec `halo2_proofs`/`pasta_curves`).
-- [ ] 4.7.2 Implémenter l'adaptateur dans `wallet-cli/src/zkp_halo2.rs` : charger les paramètres Pasta, contraindre la permutation Poseidon multi-rounds en-circuit, exposer `membership_hash` et `nullifier_hash` comme inputs publics.
-- [ ] 4.7.3 Ajouter une commande CLI `ZkpGenPoseidonParams` (ou réutiliser la commande existante) pour générer et sauvegarder `poseidon_params.bin` (Pasta field) sous `<data_dir>/zkp/poseidon_params.bin`.
+- [x] 4.7.1 Choisir et ajouter une dépendance de gadget Poseidon compatible Halo2 (git pin pour cohérence avec `halo2_proofs`/`pasta_curves`).
+- [x] 4.7.2 Implémenter l'adaptateur dans `wallet-cli/src/zkp_halo2.rs` : charger les paramètres Pasta, contraindre la permutation Poseidon multi-rounds en-circuit, exposer `membership_hash` et `nullifier_hash` comme inputs publics.
+- [x] 4.7.3 Ajouter une commande CLI `ZkpGenPoseidonParams` (ou réutiliser la commande existante) pour générer et sauvegarder `poseidon_params.bin` (Pasta field) sous `<data_dir>/zkp/poseidon_params.bin`.
 - [ ] 4.7.4 Tests :
 	- [ ] Unittest natif vs gadget: comparer la sortie native Poseidon (crate) vs la sortie contrainte par le circuit.
 	- [ ] MockProver test: prouver/verifier localement avec `zkp_halo2` feature.

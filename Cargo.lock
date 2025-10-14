@@ -2957,6 +2957,64 @@ dependencies = [
 ]
 
 [[package]]
+name = "halo2_gadgets"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73a5e510d58a07d8ed238a5a8a436fe6c2c79e1bb2611f62688bc65007b4e6e7"
+dependencies = [
+ "arrayvec 0.7.6",
+ "bitvec 1.0.1",
+ "ff 0.13.1",
+ "group 0.13.0",
+ "halo2_poseidon 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "halo2_proofs 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazy_static",
+ "pasta_curves 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand",
+ "sinsemilla",
+ "subtle",
+ "uint",
+]
+
+[[package]]
+name = "halo2_poseidon"
+version = "0.1.0"
+dependencies = [
+ "bitvec 1.0.1",
+ "ff 0.13.1",
+ "group 0.13.0",
+ "pasta_curves 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "halo2_poseidon"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa3da60b81f02f9b33ebc6252d766f843291fb4d2247a07ae73d20b791fc56f"
+dependencies = [
+ "bitvec 1.0.1",
+ "ff 0.13.1",
+ "group 0.13.0",
+ "pasta_curves 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "halo2_proofs"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "019561b5f3be60731e7b72f3f7878c5badb4174362d860b03d3cf64cb47f90db"
+dependencies = [
+ "blake2b_simd 1.0.3",
+ "ff 0.13.1",
+ "group 0.13.0",
+ "indexmap 1.9.3",
+ "maybe-rayon",
+ "pasta_curves 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand_core",
+ "tracing",
+]
+
+[[package]]
 name = "halo2_proofs"
 version = "0.3.1"
 source = "git+https://github.com/zcash/halo2#2308caf68c48c02468b66cfc452dad54e355e32f"
@@ -5520,6 +5578,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sinsemilla"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d268ae0ea06faafe1662e9967cd4f9022014f5eeb798e0c302c876df8b7af9c"
+dependencies = [
+ "group 0.13.0",
+ "pasta_curves 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "subtle",
+]
+
+[[package]]
 name = "siwe"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6892,7 +6961,9 @@ dependencies = [
  "clap",
  "common",
  "crypto-lib",
- "halo2_proofs",
+ "halo2_gadgets",
+ "halo2_poseidon 0.1.0",
+ "halo2_proofs 0.3.1 (git+https://github.com/zcash/halo2)",
  "hex",
  "pasta_curves 0.5.1 (git+https://github.com/zcash/pasta_curves)",
  "rand",

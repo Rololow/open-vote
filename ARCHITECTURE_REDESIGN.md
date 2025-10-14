@@ -454,86 +454,52 @@ Voici un plan d'action concret en trois phases.
 
 ---
 
-## 🔎 Analyse de viabilité cryptographique, risques et méthodes proposées
+## 🔄 Mise à jour : Intégration de Poseidon et ZKP
 
-Cette section regroupe une analyse de viabilité du sous-système cryptographique (attestations, commitments, ZKP) et propose plusieurs méthodes concrètes pour gérer les identités de façon décentralisée tout en préservant la vie privée.
+### Contexte
+Dans le cadre de l'amélioration de la sécurité et de la confidentialité, nous avons intégré un gadget Poseidon de production pour les circuits Halo2. Cette mise à jour permet d'utiliser des preuves à connaissance nulle (ZKP) robustes et optimisées pour les transactions sensibles.
 
-### Synthèse exécutive — viabilité
-- Le projet est viable et déjà bien avancé : gestion des VCs/DID, `commitments.log`, Merkle roots, et un prototype ZKP (Groth16 + Poseidon) sont présents.
-- Points à surveiller avant un déploiement large : gestion du "trusted setup" (Groth16), synchronisation des fichiers Poseidon/VK entre wallet et nœud, performances de génération de preuve côté client, mécanismes de révocation.
+### Changements Clés
+1. **Gadget Poseidon de Production** :
+   - Remplacement du gadget pédagogique par un gadget de production avec des paramètres avancés (multi-round S-box, MDS mixing).
+   - Paramètres utilisés :
+     - Full rounds : 8
+     - Partial rounds : 57
+     - Rate : 2
+     - Capacity : 1
+     - Alpha : 5
+     - MDS : Matrice 3x3 générée dynamiquement.
 
-### Points forts cryptographiques
-- Signatures Ed25519 pour VC/attestations : robustes et standards.
-- Canonisation JSON + SHA‑256 pour commitments : simple et reproductible.
-- Utilisation de Poseidon pour circuits SNARK‑friendly.
+2. **Génération et Synchronisation des Paramètres Poseidon** :
+   - Commande CLI ajoutée : `zkp-gen-poseidon-params`.
+   - Génère un fichier binaire `poseidon_params.bin` pour synchronisation entre le wallet-cli et le serveur blockchain.
+   - Vérification des hashes pour garantir la cohérence des paramètres entre les composants.
 
-### Risques et limites
-1. Trusted setup (Groth16) — nécessité d'une cérémonie ou migration vers un schéma sans trusted setup.
-2. Synchronisation des artefacts (Poseidon params, PK/VK) entre wallet et node — source fréquente d'échecs de vérification.
-3. Temps/mémoire de génération de preuve sur clients mobiles (bench requis).
-4. Revocation / suppression d'un engagement (append‑only `commitments.log` nécessite stratégie de révocation).
-5. Point d'autorité sur l'émetteur (Government Server) — modèle hybride à clarifier.
+3. **Tests et Benchmarks** :
+   - Tests unitaires pour comparer les sorties natives et en circuit.
+   - Benchmarks Criterion pour mesurer les performances de la génération de preuves et des hachages Poseidon.
 
-### Recommandations techniques immédiates
-- Automatiser la vérification d'intégrité des artefacts ZKP (hashes VK et Poseidon) et échouer si mismatch.
-- Documenter et, si possible, organiser une cérémonie multi‑parties (Powers‑of‑Tau) pour le trusted setup ou évaluer PLONK/Halo2 pour réduire ce risque.
-- Mesurer la performance de proof generation via `zkp_bench` sur plateformes représentatives (desktop / Android / iOS).
-- Implémenter un mécanisme de révocation (revocation list, accumulator, ou marqueur d'invalidité en chaîne) et des tests E2E associés.
+### Sécurité et Confidentialité
+- **Anti-replay** : Les preuves ZKP incluent des nullifiers uniques pour éviter les réutilisations.
+- **Synchronisation des Artefacts** :
+  - Hashes des paramètres Poseidon et des clés de vérification (VK) vérifiés automatiquement.
+  - Échec explicite si des artefacts ne correspondent pas.
+- **Prochaines Étapes** :
+  - Automatiser la vérification des artefacts dans les scripts CI/CD.
+  - Évaluer des alternatives sans trusted setup (PLONK, Halo2).
 
-### Méthodes proposées pour la gestion décentralisée des identités (5 options)
+### Documentation Mise à Jour
+- Voir `docs/zkp_run.md` pour les instructions de génération et de synchronisation des paramètres Poseidon.
+- Les étapes de dépannage incluent la vérification des fichiers `poseidon_params.bin` et des logs de vérification (`errors.log`).
 
-Méthode A — Flow actuel (commitment + issuer atteste + Merkle root + ZKP membership)
-- Contrat : VC signé → wallet calcule commitment → append au `commitments.log` → preuve ZK (membership + nullifier) pour actions.
-- Avantages : déjà implémenté; bon compromis vie privée/praticabilité.
-- Inconvénients : trusted setup (Groth16), synchronisation params, révocation complexe.
-
-Méthode B — DID + Verifiable Credentials off‑chain + on‑chain minimal reference
-- Contrat : VC W3C stocké off‑chain, on‑chain seulement le hash (commitment) et métadonnées minimales.
-- Avantages : interopérabilité, faibles fuites d'information on‑chain.
-- Inconvénients : revocation et vérification dépendent d'un registre/endpoint off‑chain.
-
-Méthode C — Pairwise / per‑service pseudonymous DIDs + selective disclosure
-- Contrat : Wallet dérive DID par service (HKDF/domaine), réduit linkability cross‑service; combine avec disclosure sélectif ou ZK.
-- Avantages : limite traçage entre services.
-- Inconvénients : gestion des seeds/backup, menace d'analyse de métadonnées.
-
-Méthode D — Anonymous credentials (BBS+ / CL‑signatures) + revocation accumulator
-- Contrat : Emission aveugle de crédentiels anonymes; wallet prouve possession/selective disclosure sans révéler identité.
-- Avantages : forte confidentialité, pas de linkage entre présentations.
-- Inconvénients : complexité d'implémentation, nécessité d'un système de révocation et de mises à jour d'accumulateur.
-
-Méthode E — Décentraliser l'émission (multi‑issuer / threshold attestation)
-- Contrat : attestations émises/validées par un quorum d'émetteurs (threshold signatures / multi‑sig) ; registre public des émetteurs.
-- Avantages : pas de single point of failure, résilience politique et opérationnelle.
-- Inconvénients : coordination entre autorités, UX plus lourde.
-
-### Checklist opérationnelle (tests prioritaires)
-1. Exécuter `zkp_bench` sur plateformes cibles et collecter latence/memoire.
-2. Automatiser vérification de hash (Poseidon/VK) au boot wallet/server.
-3. Planifier et documenter ceremony de setup ou évaluer alternative (PLONK/Halo2).
-4. Conception et test d'un flux de révocation (E2E).
-5. Rédiger model de menace et PIA (privacy impact assessment).
-
-### Recommandations d'implémentation graduelle
-- Si priorité = privacy forte : viser Méthode D (anonymous credentials) couplée à ZKP pour actions sensibles.
-- Si priorité = pragmatique / low‑effort : conserver Méthode A et durcir ops (ceremony, sync automatisée, révocation simple).
-- Si priorité = gouvernance et décentralisation : ajouter Méthode E (threshold issuers) et registre d'émetteurs sur chaîne.
-
-### Prochaines actions que je peux implémenter / livrables
-1. Ajouter un script PowerShell/CLI qui vérifie automatiquement que `poseidon_params.bin` et `vk‑*.bin` ont des hashes identiques entre wallet et server (PR automatique).
-2. Lancer des benchs `zkp_bench` (je peux les exécuter ici si tu me fournis exemples de fichiers PK/VK/params ou m'autorises à générer des paramètres temporaires).
-3. Rédiger un document comparatif Groth16 vs PLONK/Halo2 (trusted setup, proof size, temps proving/verif, maturité libs Rust).
+### Impact sur l'Architecture
+- **Wallet CLI** :
+  - Génération des preuves ZKP avec les paramètres Poseidon synchronisés.
+  - Commandes enrichies pour gérer les artefacts cryptographiques.
+- **Blockchain Server** :
+  - Vérification des preuves ZKP avec les mêmes paramètres Poseidon.
+  - Logs détaillés pour diagnostiquer les erreurs de synchronisation ou de vérification.
 
 ---
 
-## ✅ Résumé et décision attendue
-Tu peux choisir la voie que tu souhaites prioriser :
-- "Pragmatique" : stabiliser le flow actuel (A) + automations/ceremony.
-- "Privacy‑max" : investir sur anonymous credentials (D) + revocation.
-- "Décentralisation organisationnelle" : mettre en place multi‑issuer threshold (E).
-
-Indique quelle option tu veux prioriser et je peux : (1) ouvrir une PR qui ajoute le script de vérification des paramètres, (2) lancer des benchs, ou (3) rédiger le plan de migration technique détaillé pour l'option choisie.
-
----
-
-_Fin de l'ajout — analyse de viabilité, options et plan d'action intégrés._
+Cette mise à jour marque une étape importante vers une architecture plus sécurisée et robuste, tout en préparant le terrain pour des améliorations futures comme l'anonymisation complète des transactions via ZKP.

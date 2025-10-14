@@ -29,6 +29,7 @@ argon2 = "0.5"
 aes-gcm = { version = "0.10", features = ["std"] }
 zeroize = "1.7"
 base64 = "0.21"
+halo2_gadgets = "0.3.1"
 
 [features]
 default = []
@@ -50,8 +51,9 @@ zkp_groth16 = [
 
 zkp_debug = []
 zkp_halo2 = [
-	"dep:halo2_proofs",
-	"dep:pasta_curves",
+    "halo2_poseidon",
+    "halo2_proofs",
+    "pasta_curves"
 ]
 
 [dependencies.ark-bn254]
@@ -121,4 +123,8 @@ optional = true
 
 [dependencies.pasta_curves]
 git = "https://github.com/zcash/pasta_curves"
+optional = true
+
+[dependencies.halo2_poseidon]
+path = "../external/halo2/halo2_poseidon"
 optional = true
