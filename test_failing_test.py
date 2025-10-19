@@ -1,1 +1,2 @@
-﻿def test_dummy():\n    assert 1 + 1 == 2\n
+def test_dummy():
+    assert 1 + 1 == 2
