@@ -476,21 +476,36 @@ impl BlockchainNode {
             self.support_proposal(proposal_id).await;
             
             // Check if promotion threshold is reached
+            // This check is safe from race conditions because:
+            // 1. It only triggers for status "Collecte signatures"
+            // 2. The LawPromoted transaction will update status to "Approved"
+            // 3. Subsequent checks will fail the status condition
             if let Some((proposal, support_count)) = self.check_proposal_promotion(proposal_id).await {
                 info!("🚀 Automatic promotion triggered for proposal {}", proposal_id);
                 
-                // Create and submit promotion transaction
-                match self.promote_proposal_to_law(&proposal, supporter, support_count).await {
-                    Ok(promotion_tx) => {
-                        let mut blockchain = self.blockchain.write().await;
-                        if let Err(e) = blockchain.add_pending_transaction(promotion_tx) {
-                            warn!("Failed to add promotion transaction: {}", e);
-                        } else {
-                            info!("✅ Promotion transaction added to mempool");
+                // Double-check: ensure no promotion is already in the mempool for this proposal
+                let blockchain = self.blockchain.read().await;
+                let already_promoting = blockchain.pending_transactions.iter().any(|tx| {
+                    matches!(&tx.transaction_type, TransactionType::LawPromoted { proposal_id: pid, .. } if pid == proposal_id)
+                });
+                drop(blockchain);
+                
+                if already_promoting {
+                    info!("⏭️ Promotion already pending for proposal {}, skipping", proposal_id);
+                } else {
+                    // Create and submit promotion transaction
+                    match self.promote_proposal_to_law(&proposal, supporter, support_count).await {
+                        Ok(promotion_tx) => {
+                            let mut blockchain = self.blockchain.write().await;
+                            if let Err(e) = blockchain.add_pending_transaction(promotion_tx) {
+                                warn!("Failed to add promotion transaction: {}", e);
+                            } else {
+                                info!("✅ Promotion transaction added to mempool");
+                            }
                         }
-                    }
-                    Err(e) => {
-                        warn!("Failed to create promotion transaction: {}", e);
+                        Err(e) => {
+                            warn!("Failed to create promotion transaction: {}", e);
+                        }
                     }
                 }
             }
