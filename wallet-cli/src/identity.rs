@@ -93,9 +93,9 @@ pub async fn vc_request(endpoint: &str, subject_did: &str, out_dir: &str) -> Res
     let hash_hex = common::hash_hex(&digest);
 
     // storage path
-    let expanded = shellexpand::tilde(out_dir).to_string();
+    let expanded = expand_dir(out_dir);
     std::fs::create_dir_all(&expanded)?;
-    let path = std::path::Path::new(&expanded).join(format!("{}.json", hash_hex));
+    let path = expanded.join(format!("{}.json", hash_hex));
     std::fs::write(&path, serde_json::to_string_pretty(&cred)?)?;
     println!("✅ VC sauvegardé: {}", path.display());
     println!("🔗 commitment_hash: {}", hash_hex);

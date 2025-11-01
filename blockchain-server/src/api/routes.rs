@@ -1,3 +1,4 @@
+#[cfg(feature = "zkp_groth16")]
 use ark_ff::PrimeField;
 use axum::{Router, routing::{get, post}};
 use super::handlers::*;

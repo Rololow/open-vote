@@ -2966,7 +2966,7 @@ dependencies = [
  "bitvec 1.0.1",
  "ff 0.13.1",
  "group 0.13.0",
- "halo2_poseidon 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "halo2_poseidon",
  "halo2_proofs 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static",
  "pasta_curves 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2974,16 +2974,6 @@ dependencies = [
  "sinsemilla",
  "subtle",
  "uint",
-]
-
-[[package]]
-name = "halo2_poseidon"
-version = "0.1.0"
-dependencies = [
- "bitvec 1.0.1",
- "ff 0.13.1",
- "group 0.13.0",
- "pasta_curves 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -6962,7 +6952,7 @@ dependencies = [
  "common",
  "crypto-lib",
  "halo2_gadgets",
- "halo2_poseidon 0.1.0",
+ "halo2_poseidon",
  "halo2_proofs 0.3.1 (git+https://github.com/zcash/halo2)",
  "hex",
  "pasta_curves 0.5.1 (git+https://github.com/zcash/pasta_curves)",

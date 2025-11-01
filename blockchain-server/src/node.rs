@@ -994,6 +994,12 @@ mod tests {
 
 /// Public helper to ensure minimal DB schema for tests and integration
 pub async fn ensure_minimal_schema(db_url: &str) {
+        // Ensure parent directory exists so Sqlite can create the DB file
+        if let Some(stripped) = db_url.strip_prefix("sqlite://") {
+            if let Some(parent) = std::path::Path::new(stripped).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
         let opts = SqliteConnectOptions::from_str(db_url).unwrap().create_if_missing(true);
         let pool = SqlitePool::connect_with(opts).await.unwrap();
         // blocks table (subset sufficient for load_blockchain query)
