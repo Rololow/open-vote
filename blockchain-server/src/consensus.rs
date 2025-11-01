@@ -29,8 +29,10 @@ impl ConsensusService {
         
         let gossip_interval = Duration::from_secs(20);
         let prune_interval = Duration::from_secs(60);
+        let mempool_cleanup_interval = Duration::from_secs(120); // Phase 5.4: Clean mempool every 2 minutes
         let mut last_gossip = Instant::now();
         let mut last_prune = Instant::now();
+        let mut last_mempool_cleanup = Instant::now();
 
         while self.is_running {
             info!("🔍 Vérification du besoin de miner un bloc...");
@@ -66,6 +68,21 @@ impl ConsensusService {
             if last_prune.elapsed() >= prune_interval {
                 self.node.prune_stale_peers(Duration::from_secs(180)).await; // TTL: 3 min
                 last_prune = Instant::now();
+            }
+
+            // Phase 5.4: Mempool hygiene - periodic cleanup
+            if last_mempool_cleanup.elapsed() >= mempool_cleanup_interval {
+                // Remove stale transactions (older than 1 hour)
+                self.node.cleanup_stale_mempool_transactions(3600).await;
+                
+                // Enforce mempool size limit (max 10,000 transactions)
+                self.node.enforce_mempool_size_limit(10000).await;
+                
+                // Remove duplicate nullifiers (anonymous transactions)
+                #[cfg(feature = "identity")]
+                self.node.cleanup_duplicate_nullifiers_in_mempool().await;
+                
+                last_mempool_cleanup = Instant::now();
             }
 
             info!("⏰ Attente avant la prochaine vérification (10s)");

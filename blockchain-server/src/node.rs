@@ -958,6 +958,87 @@ impl BlockchainNode {
         }
     }
 
+    /// Phase 5.4: Mempool hygiene - Remove stale transactions
+    /// Removes transactions that have been in the mempool for too long (default: 1 hour)
+    pub async fn cleanup_stale_mempool_transactions(&self, max_age_seconds: u64) -> usize {
+        use chrono::Utc;
+        
+        let cutoff = Utc::now() - chrono::Duration::seconds(max_age_seconds as i64);
+        let mut blockchain = self.blockchain.write().await;
+        
+        let before = blockchain.pending_transactions.len();
+        blockchain.pending_transactions.retain(|tx| tx.timestamp > cutoff);
+        let after = blockchain.pending_transactions.len();
+        
+        let removed = before.saturating_sub(after);
+        if removed > 0 {
+            info!("🧹 Mempool cleanup: removed {} stale transactions (older than {}s)", removed, max_age_seconds);
+        }
+        
+        removed
+    }
+
+    /// Phase 5.4: Mempool hygiene - Limit mempool size
+    /// Removes oldest transactions if mempool exceeds max size
+    pub async fn enforce_mempool_size_limit(&self, max_size: usize) -> usize {
+        let mut blockchain = self.blockchain.write().await;
+        
+        if blockchain.pending_transactions.len() <= max_size {
+            return 0;
+        }
+        
+        // Sort by timestamp (oldest first) and keep only the most recent max_size
+        blockchain.pending_transactions.sort_by_key(|tx| tx.timestamp);
+        let to_remove = blockchain.pending_transactions.len() - max_size;
+        blockchain.pending_transactions.drain(0..to_remove);
+        
+        if to_remove > 0 {
+            info!("🧹 Mempool size limit: removed {} oldest transactions (limit: {})", to_remove, max_size);
+        }
+        
+        to_remove
+    }
+
+    /// Phase 5.4: Mempool hygiene - Remove transactions with duplicate nullifiers (anonymous txs)
+    /// This is an additional safety check beyond the mining-time validation
+    #[cfg(feature = "identity")]
+    pub async fn cleanup_duplicate_nullifiers_in_mempool(&self) -> usize {
+        use common::TransactionType;
+        use std::collections::{HashMap, HashSet};
+        
+        let mut blockchain = self.blockchain.write().await;
+        let mut seen: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut to_remove: HashSet<uuid::Uuid> = HashSet::new();
+        
+        for tx in &blockchain.pending_transactions {
+            let nullifier_key = match &tx.transaction_type {
+                TransactionType::AnonymousVote { law_id, proof } => {
+                    Some((Self::scope_for_anonymous_vote(law_id), proof.proof_envelope.nullifier_hex.clone()))
+                }
+                TransactionType::AnonymousSupport { proposal_id, proof } => {
+                    Some((Self::scope_for_anonymous_support(proposal_id), proof.proof_envelope.nullifier_hex.clone()))
+                }
+                _ => None,
+            };
+            
+            if let Some((scope, nullifier)) = nullifier_key {
+                if !seen.entry(scope.clone()).or_default().insert(nullifier.clone()) {
+                    // Duplicate found - mark for removal
+                    to_remove.insert(tx.id);
+                    warn!("🧹 Duplicate nullifier detected in mempool: scope={}, nullifier={}", scope, nullifier);
+                }
+            }
+        }
+        
+        let removed = to_remove.len();
+        if removed > 0 {
+            blockchain.pending_transactions.retain(|tx| !to_remove.contains(&tx.id));
+            info!("🧹 Removed {} transactions with duplicate nullifiers from mempool", removed);
+        }
+        
+        removed
+    }
+
     /// Phase 5: Check if a proposal has reached the promotion threshold and should be promoted to a law
     /// Returns Some((Proposal, support_count)) if promotion should occur, None otherwise
     pub async fn check_proposal_promotion(&self, proposal_id: &Uuid) -> Option<(Proposal, u32)> {
