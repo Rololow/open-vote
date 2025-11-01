@@ -24,6 +24,13 @@ pub struct ServerConfig {
     /// List of allowed issuer DIDs (did:key:...), used by identity checks.
     #[serde(default)]
     pub allowed_issuers_dids: Vec<String>,
+    /// Minimum support count for automatic proposal promotion to law (Phase 5)
+    #[serde(default = "default_promotion_threshold")]
+    pub proposal_promotion_threshold: u32,
+}
+
+fn default_promotion_threshold() -> u32 {
+    100 // Default: 100 supporters required for automatic promotion
 }
 
 impl Default for ServerConfig {
@@ -43,6 +50,7 @@ impl Default for ServerConfig {
             enable_mining: true,
             log_level: "info".to_string(),
             allowed_issuers_dids: Vec::new(),
+            proposal_promotion_threshold: default_promotion_threshold(),
         }
     }
 }
@@ -97,6 +105,12 @@ impl ServerConfig {
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>();
             config.allowed_issuers_dids = items;
+        }
+
+        // Proposal promotion threshold (Phase 5)
+        if let Ok(threshold) = env::var("PROPOSAL_PROMOTION_THRESHOLD") {
+            config.proposal_promotion_threshold = threshold.parse()
+                .context("Valeur promotion threshold invalide")?;
         }
 
     // Load from a configuration file if present

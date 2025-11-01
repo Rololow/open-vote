@@ -31,6 +31,33 @@ pub enum TransactionType {
     AnonymousVote { law_id: Uuid, proof: AnonymousActionPayload },
     #[cfg(feature = "identity")]
     AnonymousSupport { proposal_id: Uuid, proof: AnonymousActionPayload },
+    // ===== Phase 5: Enhanced transaction types
+    /// Identity validation event (emitted after verification)
+    IdentityValidated {
+        identity_hash: String,
+        validator: PublicKey,
+        timestamp: DateTime<Utc>,
+    },
+    /// Proposal created event (enriched metadata)
+    ProposalCreated {
+        proposal_id: Uuid,
+        author: PublicKey,
+        title: String,
+        category: String,
+    },
+    /// Support added to proposal (for tracking)
+    SupportAdded {
+        proposal_id: Uuid,
+        supporter: PublicKey,
+        support_count: u32,
+    },
+    /// Law promoted from proposal (automatic promotion)
+    LawPromoted {
+        proposal_id: Uuid,
+        law_id: Uuid,
+        promoted_by: PublicKey,
+        support_count: u32,
+    },
 }
 
 /// Transaction dans la blockchain

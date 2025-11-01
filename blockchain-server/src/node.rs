@@ -463,10 +463,39 @@ impl BlockchainNode {
 
         // 2) Ajouter à la mempool si OK
         let mut blockchain = self.blockchain.write().await;
-        blockchain.add_pending_transaction(transaction)
+        blockchain.add_pending_transaction(transaction.clone())
             .context("Erreur ajout transaction")?;
+        drop(blockchain);
 
         info!("Transaction ajoutée à la mempool");
+
+        // Phase 5: Check for automatic proposal promotion
+        use common::TransactionType;
+        if let TransactionType::SupportProposal { proposal_id, supporter } = &transaction.transaction_type {
+            // Update the in-memory proposal support count
+            self.support_proposal(proposal_id).await;
+            
+            // Check if promotion threshold is reached
+            if let Some((proposal, support_count)) = self.check_proposal_promotion(proposal_id).await {
+                info!("🚀 Automatic promotion triggered for proposal {}", proposal_id);
+                
+                // Create and submit promotion transaction
+                match self.promote_proposal_to_law(&proposal, supporter, support_count).await {
+                    Ok(promotion_tx) => {
+                        let mut blockchain = self.blockchain.write().await;
+                        if let Err(e) = blockchain.add_pending_transaction(promotion_tx) {
+                            warn!("Failed to add promotion transaction: {}", e);
+                        } else {
+                            info!("✅ Promotion transaction added to mempool");
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to create promotion transaction: {}", e);
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -927,6 +956,69 @@ impl BlockchainNode {
         } else {
             false
         }
+    }
+
+    /// Phase 5: Check if a proposal has reached the promotion threshold and should be promoted to a law
+    /// Returns Some((Proposal, support_count)) if promotion should occur, None otherwise
+    pub async fn check_proposal_promotion(&self, proposal_id: &Uuid) -> Option<(Proposal, u32)> {
+        let proposals = self.proposals.read().await;
+        if let Some(proposal) = proposals.iter().find(|p| &p.id == proposal_id) {
+            // Check if proposal is in "Collecte signatures" status and has enough supporters
+            if proposal.status == "Collecte signatures" 
+                && proposal.supporters >= self.config.proposal_promotion_threshold {
+                info!("🎯 Proposal {} has reached promotion threshold: {} >= {}", 
+                    proposal_id, proposal.supporters, self.config.proposal_promotion_threshold);
+                return Some((proposal.clone(), proposal.supporters));
+            }
+        }
+        None
+    }
+
+    /// Phase 5: Promote a proposal to a law (automatic promotion logic)
+    pub async fn promote_proposal_to_law(&self, proposal: &Proposal, supporter: &crypto_lib::PublicKey, support_count: u32) -> Result<common::Transaction> {
+        use common::{Law, LawChangeType, LawStatus, TransactionType};
+        use crypto_lib::KeyPair;
+        
+        info!("📜 Promoting proposal {} to law", proposal.id);
+        
+        // Create a new law from the proposal
+        let mut law = Law::new(
+            proposal.title.clone(),
+            proposal.full_text.clone(),
+            proposal.description.clone(),
+            proposal.category.clone(),
+            supporter.clone(),
+            LawChangeType::Creation,
+        );
+        
+        // Set law to InReview status (not immediately active)
+        law.status = LawStatus::InReview;
+        law.tags = proposal.tags.clone();
+        
+        // Create a LawPromoted transaction to record this event
+        let law_id = law.id;
+        let tx_type = TransactionType::LawPromoted {
+            proposal_id: proposal.id,
+            law_id,
+            promoted_by: supporter.clone(),
+            support_count,
+        };
+        
+        // Sign the transaction (using node's keypair or a system keypair)
+        // For now, we'll use the supporter's signature, but in production this should be signed by the node
+        let kp = KeyPair::generate(); // TODO: Use a proper system keypair
+        let tx_msg = format!("PROMOTE:{}:{}", proposal.id, law_id);
+        let signature = kp.sign(tx_msg.as_bytes());
+        
+        let transaction = common::Transaction::new(
+            tx_type,
+            supporter.clone(),
+            signature,
+            0, // nonce
+            0, // fee
+        );
+        
+        Ok(transaction)
     }
 }
 

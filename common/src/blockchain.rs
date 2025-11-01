@@ -443,6 +443,53 @@ impl Blockchain {
                 }
                 // Placeholder: in future, increment supporters_count using a nullifier DB to prevent duplicates.
             }
+
+            // ===== Phase 5: Enhanced transaction types =====
+            TransactionType::IdentityValidated { identity_hash: _, validator: _, timestamp: _ } => {
+                // Record identity validation event
+                // This is primarily for audit trail and doesn't modify state directly
+            }
+
+            TransactionType::ProposalCreated { proposal_id, author: _, title: _, category: _ } => {
+                // Verify the proposal exists (should have been created by CreateProposal)
+                if !self.proposals.contains_key(proposal_id) {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Proposal metadata event for non-existent proposal".to_string()
+                    ));
+                }
+                // This is an enriched event for tracking/indexing
+            }
+
+            TransactionType::SupportAdded { proposal_id, supporter: _, support_count } => {
+                // Verify the proposal exists
+                if let Some(proposal) = self.proposals.get_mut(proposal_id) {
+                    // Update the support count if this transaction carries the canonical count
+                    proposal.supporters_count = *support_count;
+                } else {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Support event for non-existent proposal".to_string()
+                    ));
+                }
+            }
+
+            TransactionType::LawPromoted { proposal_id, law_id, promoted_by: _, support_count: _ } => {
+                // Verify the proposal exists
+                if !self.proposals.contains_key(proposal_id) {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Promotion event for non-existent proposal".to_string()
+                    ));
+                }
+                // Verify the law exists (should have been created as part of promotion)
+                if !self.laws.contains_key(law_id) {
+                    return Err(BlockchainError::InvalidTransaction(
+                        "Promotion event for non-existent law".to_string()
+                    ));
+                }
+                // Update proposal status to indicate it has been promoted
+                if let Some(proposal) = self.proposals.get_mut(proposal_id) {
+                    proposal.status = crate::proposal::ProposalStatus::Approved;
+                }
+            }
         }
         
         Ok(())
