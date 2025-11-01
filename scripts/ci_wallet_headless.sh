@@ -57,7 +57,7 @@ mkdir -p "$CRED_DIR"
 
 # 1) Keystore init (idempotent)
 step "Initializing keystore at $STORE"
-if cargo run -p wallet-cli -- keystore-init --passphrase "$PASSPHRASE" --store "$STORE"; then
+if cargo run -q -p wallet-cli --bin wallet-cli -- keystore-init --passphrase "$PASSPHRASE" --store "$STORE"; then
   ok "Keystore initialized"
 else
   warn "Keystore may already exist at $STORE"
@@ -66,7 +66,7 @@ fi
 # 2) Generate/import key if not provided
 if [[ -z "$KEY_ID" ]]; then
   step "Generating and importing keypair into keystore"
-  OUT=$(cargo run -p wallet-cli -- keystore-generate-keypair --passphrase "$PASSPHRASE" --store "$STORE" 2>&1 || true)
+  OUT=$(cargo run -q -p wallet-cli --bin wallet-cli -- keystore-generate-keypair --passphrase "$PASSPHRASE" --store "$STORE" 2>&1 || true)
   printf "%s\n" "$OUT"
   KEY_ID=$(printf "%s\n" "$OUT" | grep -o 'id=[^ ]\+' | head -1 | cut -d= -f2 || true)
   if [[ -z "$KEY_ID" ]]; then
@@ -79,7 +79,7 @@ fi
 
 # 3) Derive did:key from keystore key
 step "Deriving did:key from key-id=$KEY_ID"
-DID_OUT=$(cargo run -p wallet-cli -- did-generate --key-id "$KEY_ID" --store "$STORE" 2>&1)
+DID_OUT=$(cargo run -q -p wallet-cli --bin wallet-cli -- did-generate --key-id "$KEY_ID" --store "$STORE" 2>&1)
 printf "%s\n" "$DID_OUT"
 DID=$(printf "%s\n" "$DID_OUT" | grep -o 'did:key:[^ ]\+' | head -1 || true)
 if [[ -z "$DID" ]]; then
@@ -90,14 +90,14 @@ ok "DID: $DID"
 # 4) Optional VC request/commit
 if [[ -n "$ISSUER_ENDPOINT" ]]; then
   step "Requesting VC from issuer at $ISSUER_ENDPOINT"
-  cargo run -p wallet-cli -- vc-request --endpoint "$ISSUER_ENDPOINT" --subject-did "$DID" --out-dir "$CRED_DIR"
+  cargo run -q -p wallet-cli --bin wallet-cli -- vc-request --endpoint "$ISSUER_ENDPOINT" --subject-did "$DID" --out-dir "$CRED_DIR"
   VC_FILE=$(ls -1t "$CRED_DIR"/*.json 2>/dev/null | head -1 || true)
   if [[ -z "$VC_FILE" ]]; then
     fail "No VC file found in $CRED_DIR after vc-request"; exit 1
   fi
   ok "VC file: $VC_FILE"
   step "Committing VC to node (public presence)"
-  if ! cargo run -p wallet-cli -- vc-commit --file "$VC_FILE" --dir "$CRED_DIR" --node-url "$NODE_URL" --issuer-endpoint "$ISSUER_ENDPOINT"; then
+  if ! cargo run -q -p wallet-cli --bin wallet-cli -- vc-commit --file "$VC_FILE" --dir "$CRED_DIR" --node-url "$NODE_URL" --issuer-endpoint "$ISSUER_ENDPOINT"; then
     warn "vc-commit failed (node or issuer may be unavailable)"
   fi
 fi
@@ -106,7 +106,7 @@ fi
 if curl -fsS "$NODE_URL/health" >/dev/null 2>&1; then
   step "Creating a proposal (signed with key-id=$KEY_ID)"
   TITLE="CI Proposal $(date -Is)"; DESC="Automated run $(date -Is)"
-  cargo run -p wallet-cli -- create-proposal --title "$TITLE" --description "$DESC" --key-id "$KEY_ID" --store "$STORE" --node-url "$NODE_URL"
+  cargo run -q -p wallet-cli --bin wallet-cli -- create-proposal --title "$TITLE" --description "$DESC" --key-id "$KEY_ID" --store "$STORE" --node-url "$NODE_URL"
   ok "Proposal submitted"
 else
   warn "Node health check failed at $NODE_URL/health. Skipping proposal submission."

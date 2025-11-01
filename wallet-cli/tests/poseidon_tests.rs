@@ -1,4 +1,5 @@
-#[cfg(test)]
+#![cfg(feature = "zkp_halo2")]
+
 mod tests {
     use halo2_gadgets_poseidon::PoseidonParams;
     use halo2_proofs::pasta::Fp;
@@ -29,7 +30,7 @@ mod tests {
 
     #[test]
     fn test_poseidon_native_vs_circuit() {
-        use halo2_gadgets_poseidon::{PoseidonChip, PoseidonConfig};
+    use halo2_poseidon::{PoseidonChip, PoseidonConfig};
         use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner};
         use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error};
 

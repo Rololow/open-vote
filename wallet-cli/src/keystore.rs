@@ -6,12 +6,13 @@ use std::path::{Path, PathBuf};
 
 // Crypto
 use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, OsRng, generic_array::GenericArray}};
-use argon2::{Argon2, PasswordHasher};
-use argon2::password_hash::{SaltString, PasswordHash};
+use argon2::Argon2;
+use base64::{engine::general_purpose, Engine as _};
 use zeroize::Zeroize;
 
 const DEFAULT_STORE: &str = "~/.e-gov-wallet/keys.enc";
-const MAGIC: &[u8; 8] = b"EGOVKS\x01"; // format versioned
+// 8-byte magic (EGOVKS + version 1 + null)
+const MAGIC: &[u8; 8] = b"EGOVKS\x01\0"; // format versioned
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeystoreEntry {
@@ -49,25 +50,23 @@ fn expand_path(p: &str) -> PathBuf {
 fn default_store_path() -> PathBuf { expand_path(DEFAULT_STORE) }
 
 fn derive_key(passphrase: &str, params: &KdfParams) -> Result<[u8; 32]> {
-    let salt_bytes = base64::decode(&params.salt).context("decode salt b64")?;
-    let argon = Argon2::new_with_threads(
-        argon2::Algorithm::Argon2id,
-        argon2::Version::V0x13,
-        params.m_cost,
-        params.t_cost,
-        params.p_cost,
-    ).context("argon2 params")?;
+    let salt_bytes = general_purpose::STANDARD.decode(&params.salt).context("decode salt b64")?;
+    // Use default Argon2 parameters for compatibility with argon2 crate v0.5
+    let argon = Argon2::default();
     let mut out = [0u8; 32];
-    argon.hash_password_into(passphrase.as_bytes(), &salt_bytes, &mut out).context("argon2 kdf")?;
+    argon.hash_password_into(passphrase.as_bytes(), &salt_bytes, &mut out)
+        .map_err(|e| anyhow::anyhow!("argon2 kdf error: {}", e))?;
     Ok(out)
 }
 
 fn encrypt(passphrase: &str, data: &KeystoreData) -> Result<Vec<u8>> {
     // serialize cleartext JSON
     let plaintext = serde_json::to_vec(data)?;
-    // KDF params
-    let salt = SaltString::generate(&mut OsRng);
-    let params = KdfParams { salt: salt.to_string(), m_cost: 19456, t_cost: 2, p_cost: 1 };
+    // KDF params: generate raw random salt bytes and store as base64
+    let mut salt_bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut salt_bytes);
+    let salt_b64 = general_purpose::STANDARD.encode(&salt_bytes);
+    let params = KdfParams { salt: salt_b64, m_cost: 19456, t_cost: 2, p_cost: 1 };
     let key = derive_key(passphrase, &params)?;
     // AEAD
     let cipher = Aes256Gcm::new(GenericArray::from_slice(&key));

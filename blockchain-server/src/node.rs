@@ -463,10 +463,54 @@ impl BlockchainNode {
 
         // 2) Ajouter à la mempool si OK
         let mut blockchain = self.blockchain.write().await;
-        blockchain.add_pending_transaction(transaction)
+        blockchain.add_pending_transaction(transaction.clone())
             .context("Erreur ajout transaction")?;
+        drop(blockchain);
 
         info!("Transaction ajoutée à la mempool");
+
+        // Phase 5: Check for automatic proposal promotion
+        use common::TransactionType;
+        if let TransactionType::SupportProposal { proposal_id, supporter } = &transaction.transaction_type {
+            // Update the in-memory proposal support count
+            self.support_proposal(proposal_id).await;
+            
+            // Check if promotion threshold is reached
+            // This check is safe from race conditions because:
+            // 1. It only triggers for status "Collecte signatures"
+            // 2. The LawPromoted transaction will update status to "Approved"
+            // 3. Subsequent checks will fail the status condition
+            if let Some((proposal, support_count)) = self.check_proposal_promotion(proposal_id).await {
+                info!("🚀 Automatic promotion triggered for proposal {}", proposal_id);
+                
+                // Double-check: ensure no promotion is already in the mempool for this proposal
+                let blockchain = self.blockchain.read().await;
+                let already_promoting = blockchain.pending_transactions.iter().any(|tx| {
+                    matches!(&tx.transaction_type, TransactionType::LawPromoted { proposal_id: pid, .. } if pid == proposal_id)
+                });
+                drop(blockchain);
+                
+                if already_promoting {
+                    info!("⏭️ Promotion already pending for proposal {}, skipping", proposal_id);
+                } else {
+                    // Create and submit promotion transaction
+                    match self.promote_proposal_to_law(&proposal, supporter, support_count).await {
+                        Ok(promotion_tx) => {
+                            let mut blockchain = self.blockchain.write().await;
+                            if let Err(e) = blockchain.add_pending_transaction(promotion_tx) {
+                                warn!("Failed to add promotion transaction: {}", e);
+                            } else {
+                                info!("✅ Promotion transaction added to mempool");
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to create promotion transaction: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -928,6 +972,150 @@ impl BlockchainNode {
             false
         }
     }
+
+    /// Phase 5.4: Mempool hygiene - Remove stale transactions
+    /// Removes transactions that have been in the mempool for too long (default: 1 hour)
+    pub async fn cleanup_stale_mempool_transactions(&self, max_age_seconds: u64) -> usize {
+        use chrono::Utc;
+        
+        let cutoff = Utc::now() - chrono::Duration::seconds(max_age_seconds as i64);
+        let mut blockchain = self.blockchain.write().await;
+        
+        let before = blockchain.pending_transactions.len();
+        blockchain.pending_transactions.retain(|tx| tx.timestamp > cutoff);
+        let after = blockchain.pending_transactions.len();
+        
+        let removed = before.saturating_sub(after);
+        if removed > 0 {
+            info!("🧹 Mempool cleanup: removed {} stale transactions (older than {}s)", removed, max_age_seconds);
+        }
+        
+        removed
+    }
+
+    /// Phase 5.4: Mempool hygiene - Limit mempool size
+    /// Removes oldest transactions if mempool exceeds max size
+    pub async fn enforce_mempool_size_limit(&self, max_size: usize) -> usize {
+        let mut blockchain = self.blockchain.write().await;
+        
+        if blockchain.pending_transactions.len() <= max_size {
+            return 0;
+        }
+        
+        // Sort by timestamp (oldest first) and keep only the most recent max_size
+        blockchain.pending_transactions.sort_by_key(|tx| tx.timestamp);
+        let to_remove = blockchain.pending_transactions.len() - max_size;
+        blockchain.pending_transactions.drain(0..to_remove);
+        
+        if to_remove > 0 {
+            info!("🧹 Mempool size limit: removed {} oldest transactions (limit: {})", to_remove, max_size);
+        }
+        
+        to_remove
+    }
+
+    /// Phase 5.4: Mempool hygiene - Remove transactions with duplicate nullifiers (anonymous txs)
+    /// This is an additional safety check beyond the mining-time validation
+    #[cfg(feature = "identity")]
+    pub async fn cleanup_duplicate_nullifiers_in_mempool(&self) -> usize {
+        use common::TransactionType;
+        use std::collections::{HashMap, HashSet};
+        
+        let mut blockchain = self.blockchain.write().await;
+        let mut seen: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut to_remove: HashSet<uuid::Uuid> = HashSet::new();
+        
+        for tx in &blockchain.pending_transactions {
+            let nullifier_key = match &tx.transaction_type {
+                TransactionType::AnonymousVote { law_id, proof } => {
+                    Some((Self::scope_for_anonymous_vote(law_id), proof.proof_envelope.nullifier_hex.clone()))
+                }
+                TransactionType::AnonymousSupport { proposal_id, proof } => {
+                    Some((Self::scope_for_anonymous_support(proposal_id), proof.proof_envelope.nullifier_hex.clone()))
+                }
+                _ => None,
+            };
+            
+            if let Some((scope, nullifier)) = nullifier_key {
+                if !seen.entry(scope.clone()).or_default().insert(nullifier.clone()) {
+                    // Duplicate found - mark for removal
+                    to_remove.insert(tx.id);
+                    warn!("🧹 Duplicate nullifier detected in mempool: scope={}, nullifier={}", scope, nullifier);
+                }
+            }
+        }
+        
+        let removed = to_remove.len();
+        if removed > 0 {
+            blockchain.pending_transactions.retain(|tx| !to_remove.contains(&tx.id));
+            info!("🧹 Removed {} transactions with duplicate nullifiers from mempool", removed);
+        }
+        
+        removed
+    }
+
+    /// Phase 5: Check if a proposal has reached the promotion threshold and should be promoted to a law
+    /// Returns Some((Proposal, support_count)) if promotion should occur, None otherwise
+    pub async fn check_proposal_promotion(&self, proposal_id: &Uuid) -> Option<(Proposal, u32)> {
+        let proposals = self.proposals.read().await;
+        if let Some(proposal) = proposals.iter().find(|p| &p.id == proposal_id) {
+            // Check if proposal is in "Collecte signatures" status and has enough supporters
+            if proposal.status == "Collecte signatures" 
+                && proposal.supporters >= self.config.proposal_promotion_threshold {
+                info!("🎯 Proposal {} has reached promotion threshold: {} >= {}", 
+                    proposal_id, proposal.supporters, self.config.proposal_promotion_threshold);
+                return Some((proposal.clone(), proposal.supporters));
+            }
+        }
+        None
+    }
+
+    /// Phase 5: Promote a proposal to a law (automatic promotion logic)
+    pub async fn promote_proposal_to_law(&self, proposal: &Proposal, supporter: &crypto_lib::PublicKey, support_count: u32) -> Result<common::Transaction> {
+        use common::{Law, LawChangeType, LawStatus, TransactionType};
+        use crypto_lib::KeyPair;
+        
+        info!("📜 Promoting proposal {} to law", proposal.id);
+        
+        // Create a new law from the proposal
+        let mut law = Law::new(
+            proposal.title.clone(),
+            proposal.full_text.clone(),
+            proposal.description.clone(),
+            proposal.category.clone(),
+            supporter.clone(),
+            LawChangeType::Creation,
+        );
+        
+        // Set law to InReview status (not immediately active)
+        law.status = LawStatus::InReview;
+        law.tags = proposal.tags.clone();
+        
+        // Create a LawPromoted transaction to record this event
+        let law_id = law.id;
+        let tx_type = TransactionType::LawPromoted {
+            proposal_id: proposal.id,
+            law_id,
+            promoted_by: supporter.clone(),
+            support_count,
+        };
+        
+        // Sign the transaction (using node's keypair or a system keypair)
+        // For now, we'll use the supporter's signature, but in production this should be signed by the node
+        let kp = KeyPair::generate(); // TODO: Use a proper system keypair
+        let tx_msg = format!("PROMOTE:{}:{}", proposal.id, law_id);
+        let signature = kp.sign(tx_msg.as_bytes());
+        
+        let transaction = common::Transaction::new(
+            tx_type,
+            supporter.clone(),
+            signature,
+            0, // nonce
+            0, // fee
+        );
+        
+        Ok(transaction)
+    }
 }
 
 /// Métadonnées internes d'un pair
@@ -994,6 +1182,12 @@ mod tests {
 
 /// Public helper to ensure minimal DB schema for tests and integration
 pub async fn ensure_minimal_schema(db_url: &str) {
+        // Ensure parent directory exists so Sqlite can create the DB file
+        if let Some(stripped) = db_url.strip_prefix("sqlite://") {
+            if let Some(parent) = std::path::Path::new(stripped).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
         let opts = SqliteConnectOptions::from_str(db_url).unwrap().create_if_missing(true);
         let pool = SqlitePool::connect_with(opts).await.unwrap();
         // blocks table (subset sufficient for load_blockchain query)

@@ -8,6 +8,10 @@ description = "Tests d'intégration pour le système e-gouvernement"
 name = "integration_tests"
 path = "tests/integration_tests.rs"
 
+[[test]]
+name = "phase5_promotion_tests"
+path = "phase5_promotion_tests.rs"
+
 [dependencies]
 tokio = { workspace = true }
 common = { path = "../common", features = ["identity"] }
@@ -17,6 +21,7 @@ reqwest = { version = "0.11", default-features = false, features = ["json", "rus
 serde_json = { workspace = true }
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "macros"] }
 hex = { workspace = true }
+chrono = { workspace = true }
 
 [features]
 default = []

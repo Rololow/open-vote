@@ -18,7 +18,7 @@ use tracing::{info, error};
 
 mod identity;
 mod keystore;
-#[cfg(feature = "zkp_groth16")]
+#[cfg(any(feature = "zkp_groth16", feature = "zkp_halo2"))]
 mod zkp;
 #[cfg(feature = "zkp_halo2")]
 mod zkp_halo2;
@@ -463,7 +463,6 @@ async fn main() -> Result<()> {
         }
         Commands::KeystoreGenerateKeypair { passphrase, id, store, json } => {
             use crypto_lib::KeyPair;
-            use base64ct::{Base64UrlUnpadded, Encoding};
             // Génération
             let kp = KeyPair::generate();
             let priv_hex = hex::encode(kp.private_key_bytes());
@@ -527,34 +526,11 @@ async fn main() -> Result<()> {
     }
 }
 
-#[cfg(feature = "zkp_groth16")]
+#[cfg(any(feature = "zkp_groth16", feature = "zkp_halo2"))]
 fn zkp_gen_poseidon_params(data_dir: &str) -> Result<()> {
     use crate::zkp::generate_and_save_poseidon_params;
     generate_and_save_poseidon_params(data_dir)?;
     println!("✅ Poseidon parameters generated and saved to {}/zkp/poseidon_params.bin", data_dir);
-    Ok(())
-}
-
-#[cfg(feature = "zkp_halo2")]
-fn zkp_gen_poseidon_params(data_dir: &str) -> Result<()> {
-    use halo2_gadgets_poseidon::PoseidonParams;
-    use std::fs;
-    use std::path::Path;
-
-    // Generate Poseidon parameters for Pasta field
-    let params = PoseidonParams::new(3, 8, 57, None);
-
-    // Ensure the directory exists
-    let path = Path::new(data_dir).join("poseidon_params.bin");
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    // Save parameters to file
-    let mut file = fs::File::create(&path)?;
-    bincode::serialize_into(&mut file, &params)?;
-
-    println!("✅ Poseidon parameters generated and saved to {}", path.display());
     Ok(())
 }
 
@@ -682,7 +658,6 @@ async fn create_proposal(
 ) -> Result<()> {
     use crypto_lib::KeyPair;
     use common::{Transaction, TransactionType, proposal::Proposal};
-    use std::fs;
     use uuid::Uuid;
     use chrono::Utc;
     

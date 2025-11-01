@@ -1,9 +1,11 @@
+#![cfg(feature = "zkp_halo2")]
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use halo2_gadgets_poseidon::PoseidonParams;
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error};
 use halo2_proofs::pasta::Fp;
-use halo2_gadgets_poseidon::{PoseidonChip, PoseidonConfig};
+use halo2_poseidon::{PoseidonChip, PoseidonConfig};
 
 #[derive(Clone, Debug)]
 struct PoseidonCircuit {
