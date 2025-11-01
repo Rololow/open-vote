@@ -3478,6 +3478,7 @@ dependencies = [
 name = "integration-tests"
 version = "0.1.1"
 dependencies = [
+ "chrono",
  "common",
  "crypto-lib",
  "hex",
