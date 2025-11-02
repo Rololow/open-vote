@@ -7,7 +7,7 @@ use tracing::{info, warn};
 mod signing;
 pub use signing::{sign_credential_with_artifacts, CredentialSignatureArtifacts};
 
-mod rotation;
+pub mod rotation;
 pub use rotation::{KeyRotationConfig, VerificationKeyInfo};
 
 /// Configuration runtime de l'issuer.
