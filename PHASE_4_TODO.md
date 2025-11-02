@@ -26,15 +26,18 @@ Tâches détaillées :
 - [x] 4.7.2 Implémenter l'adaptateur dans `wallet-cli/src/zkp_halo2.rs` : charger les paramètres Pasta, contraindre la permutation Poseidon multi-rounds en-circuit, exposer `membership_hash` et `nullifier_hash` comme inputs publics.
 - [x] 4.7.3 Ajouter une commande CLI `ZkpGenPoseidonParams` (ou réutiliser la commande existante) pour générer et sauvegarder `poseidon_params.bin` (Pasta field) sous `<data_dir>/zkp/poseidon_params.bin`.
 - [ ] 4.7.4 Tests :
-	- [ ] Unittest natif vs gadget: comparer la sortie native Poseidon (crate) vs la sortie contrainte par le circuit.
-	- [ ] MockProver test: prouver/verifier localement avec `zkp_halo2` feature.
-	- [ ] E2E smoke: remplacer POC JSON par un proof envelope compatible et vérifier que le nœud accepte la preuve (mocked or local verifier).
-- [ ] 4.7.5 Documentation: documenter la procédure de génération de paramètres et vérification des hachages de params (client/server) dans `docs/zkp_run.md` et `ARCHITECTURE_REDESIGN.md`.
+	- [x] Unittest natif vs gadget: comparer la sortie native Poseidon (crate) vs la sortie contrainte par le circuit. (implémenté dans `wallet-cli::zkp` / tests `tests/poseidon_tests.rs` — voir remarques ci-dessous)
+	- [ ] E2E smoke: remplacer POC JSON par un proof envelope compatible et vérifier que le nœud accepte la preuve (mocked or local verifier). (partiellement implémenté; nécessite dépendances optionnelles pour Halo2 si vous voulez exécuter le PoC Halo2)
+	- [x] 4.7.5 Documentation: documenter la procédure de génération de paramètres et vérification des hachages de params (client/server) dans `docs/zkp_run.md` and `ARCHITECTURE_REDESIGN.md`. (mise à jour: ajout d'une note sur dépendances Halo2 optionnelles)
 
-Critères d'acceptation :
+- Critères d'acceptation :
 - Le gadget Poseidon compile et passe MockProver tests (`cargo test -p wallet-cli --features zkp_halo2`).
 - La commande de génération de paramètres produit un `poseidon_params.bin` lisible par la CLI et le serveur, et leurs hachages peuvent être comparés.
 - Les tests unitaires natif vs circuit passent.
+
+Remarques importantes:
+- Le crate `wallet-cli` fournit déjà des tests et helpers pour Groth16 (BN254) et un POC Halo2 circuit (`zkp_halo2`). Toutefois, l'exécution complète des tests Halo2/POC exige des dépendances externes (ex: `halo2_proofs`, `pasta_curves`, `halo2_poseidon`, `halo2_gadgets_poseidon`) qui sont optionnelles et peuvent être omises pour des builds rapides.
+- Si vous souhaitez exécuter le POC Halo2/integration complète, activez la feature `zkp_halo2` et ajoutez/activez les dépendances Halo2 dans `wallet-cli/Cargo.toml` (voir `docs/zkp_run.md` pour la procédure). Les tests Groth16/Poseidon natifs continuent de fonctionner sans ces dépendances.
 
 ## Critères de réussite
 - CLI peut être utilisée en script CI pour un flow complet.

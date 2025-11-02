@@ -46,6 +46,27 @@ pwsh -File .\scripts\zkp_flow_with_clean_log.ps1
 
 If you set `BLOCKCHAIN_DATA_DIRECTORY` to a fixed path the script will leave these files in that folder so they can be archived by CI.
 
+### Halo2 / POC notes (optional)
+
+The repository contains a small Halo2 POC circuit and helper (`wallet-cli/src/zkp_halo2.rs`) that demonstrates producing a tiny Halo2 proof (MockProver-based). Running the full Halo2 POC or related integration tests may require additional optional dependencies that are not included by default (to avoid pulling heavy or unstable transitive deps):
+
+- `halo2_proofs` (git)
+- `pasta_curves` (git)
+- `halo2_poseidon` (crate)
+- `halo2_gadgets_poseidon` (crate)
+
+If you want to run the Halo2 POC/integration tests:
+
+1. Edit `wallet-cli/Cargo.toml` and enable or add the optional dependencies listed above, or enable the `zkp_halo2` feature and ensure those optional crates are included in that feature list.
+2. Run the tests with the feature enabled:
+
+```powershell
+# enable Halo2 POC feature (may require network to fetch git deps)
+cargo test -p wallet-cli --features zkp_halo2 -- --nocapture
+```
+
+Note: depending on the exact versions used, fetching/building Halo2 and Pasta crates can be slow and may require up-to-date toolchain and system libraries. If you prefer a fast CI-friendly run, keep `zkp_halo2` disabled and rely on the Groth16 tests and Poseidon native tests which are already present and usable.
+
 ### Inspecting verification logs (`errors.log`)
 
 The verification step writes helpful diagnostic lines to `errors.log` in the repository root. Key lines to look for (examples):
