@@ -8,6 +8,7 @@ pub mod types;
 pub mod handlers;
 pub mod routes;
 pub mod issuer_api;
+pub mod monitoring_api;
 
 // pub use types::*; // avoid unused import warning
 // pub use handlers::*; // unused re-export (commented)

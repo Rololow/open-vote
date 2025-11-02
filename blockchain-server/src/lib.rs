@@ -38,6 +38,8 @@ pub mod identity_root;
 #[cfg(feature = "zkp_groth16")]
 pub mod zkp_verifier;
 pub mod dbutil;
+pub mod revocation;
+pub mod monitoring;
 
 // Re-exports for convenient access in tests
 pub use config::ServerConfig;

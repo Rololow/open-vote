@@ -14,6 +14,8 @@ mod issuer; // Phase 2: module d'émission VC
 mod identity_root; // Phase 3: anchored identity roots helpers
 #[cfg(feature = "zkp_groth16")]
 mod zkp_verifier; // Phase 3: Groth16 verifier (optional)
+mod revocation; // Phase 6: revocation list
+mod monitoring; // Phase 6: security monitoring
 
 use anyhow::Result;
 use std::sync::Arc;

@@ -3,11 +3,14 @@ use std::process::Command;
 use blockchain_server::issuer::{IssuerConfig, load_or_create_key, derive_did_key_ed25519};
 
 fn tmp_key_path() -> std::path::PathBuf {
+    // Make the temporary path more robustly unique by including process id and thread id
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("issuer_import_test_{}.json", nanos))
+    let pid = std::process::id();
+    let tid = format!("{:?}", std::thread::current().id());
+    std::env::temp_dir().join(format!("issuer_import_test_{}_{}_{}.json", pid, tid, nanos))
 }
 
 #[test]
